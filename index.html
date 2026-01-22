@@ -48,13 +48,35 @@
     <script>
       const LIVE_API_URL = "https://rolls-connect-round-definitions.trycloudflare.com/data";
       const POLL_INTERVAL_MS = 2000;
-      const map = L.map("map").setView([32.004, 34.876], 12);
+      const map = L.map("map").setView([32.004, 34.876], 13);
       const layer = L.layerGroup().addTo(map);
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      const osmStreets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
         attribution: "&copy; OpenStreetMap contributors",
       }).addTo(map);
+      const osmStandard = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
+      });
+      const esriSat = L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        {
+          maxZoom: 19,
+          attribution: "Tiles &copy; Esri",
+        }
+      );
+      L.control
+        .layers(
+          {
+            "OSM streets": osmStreets,
+            OSM: osmStandard,
+            "Satellite (Esri)": esriSat,
+          },
+          {},
+          { position: "topright" }
+        )
+        .addTo(map);
 
       const markers = {};
       let fitted = false;
@@ -125,6 +147,34 @@
 
       map.on("zoomend", updateMarkerIcons);
 
+      function statusLabel(row) {
+        return row.movement_status || row.connection_status || "unknown";
+      }
+
+      function popupHtml(row) {
+        const label = row.label || row.tracker_id || "tracker";
+        const lat = row.lat;
+        const lng = row.lng;
+        const status = statusLabel(row);
+        const base = `<strong>${label}</strong><br/>${status}<br/>${lat}, ${lng}`;
+        const extra = [];
+        if (label.includes("6074")) {
+          extra.push(`Engine_Temp: ${row.Engine_Temp ?? "--"}`);
+          extra.push(`Engine_O.P: ${row["Engine_O.P"] ?? "--"}`);
+          extra.push(`Fuel: ${row.Fuel ?? "--"}`);
+          extra.push(`Engine Hours: ${row.engine_hours ?? "--"}`);
+          extra.push(`Odometer: ${row.odometer ?? "--"}`);
+        }
+        if (label.includes("5032")) {
+          extra.push(`Fuel_level: ${row.Fuel_level ?? "--"}`);
+          extra.push(`Engine RPM: ${row.engine_rpm ?? "--"}`);
+          extra.push(`Engine Hours: ${row.engine_hours_total ?? row.engine_hours ?? "--"}`);
+          extra.push(`Next Service: ${row.next_service_hours ?? "--"}`);
+          extra.push(`Odometer: ${row.odometer ?? "--"}`);
+        }
+        return `${base}${extra.length ? "<br/>" + extra.join("<br/>") : ""}`;
+      }
+
       function updateMarkers(rows) {
         layer.clearLayers();
         const bounds = [];
@@ -143,11 +193,13 @@
             icon: markerIcon(iconPath, size),
             iconPath,
           })
-            .bindPopup(`<strong>${label}</strong><br/>${lat}, ${lng}`)
+            .bindPopup(popupHtml(row))
             .bindTooltip(label, { permanent: true, direction: "top", offset: [0, -12] });
           markers[label] = marker;
           marker.addTo(layer);
-          bounds.push([lat, lng]);
+          if (!String(label).toLowerCase().includes("skoda")) {
+            bounds.push([lat, lng]);
+          }
         });
 
         const statusEl = document.getElementById("mapStatus");
@@ -155,7 +207,7 @@
           statusEl.textContent = `Trackers: ${rows.length} | Markers: ${bounds.length}`;
         }
 
-        if (!fitted && bounds.length) {
+        if (!fitted) {
           if (bounds.length === 1) {
             map.setView(bounds[0], 15);
           } else {
