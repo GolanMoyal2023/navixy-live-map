@@ -80,6 +80,7 @@
 
       const markers = {};
       let fitted = false;
+      let activePopupId = null;
       const iconCache = new Map();
 
       function iconPathForRow(row) {
@@ -187,6 +188,7 @@
           }
           const status = row.connection_status || "unknown";
           const label = row.label || row.tracker_id || "tracker";
+          const id = row.tracker_id || label;
           const iconPath = iconPathForRow(row);
           const size = markerSizeForZoom(map.getZoom());
           const marker = L.marker([lat, lng], {
@@ -195,7 +197,17 @@
           })
             .bindPopup(popupHtml(row))
             .bindTooltip(label, { permanent: true, direction: "top", offset: [0, -12] });
-          markers[label] = marker;
+          marker.off("click", marker._openPopup);
+          marker.on("click", () => {
+            if (marker.isPopupOpen()) {
+              marker.closePopup();
+              activePopupId = null;
+            } else {
+              marker.openPopup();
+              activePopupId = id;
+            }
+          });
+          markers[id] = marker;
           marker.addTo(layer);
           if (!String(label).toLowerCase().includes("skoda")) {
             bounds.push([lat, lng]);
@@ -214,6 +226,9 @@
             map.fitBounds(bounds, { padding: [20, 20] });
           }
           fitted = true;
+        }
+        if (activePopupId && markers[activePopupId]) {
+          markers[activePopupId].openPopup();
         }
       }
 
