@@ -207,6 +207,11 @@
               activePopupId = id;
             }
           });
+          marker.on("popupclose", () => {
+            if (activePopupId === id) {
+              activePopupId = null;
+            }
+          });
           markers[id] = marker;
           marker.addTo(layer);
           if (!String(label).toLowerCase().includes("skoda")) {
@@ -228,7 +233,7 @@
           fitted = true;
         }
         if (activePopupId && markers[activePopupId]) {
-          markers[activePopupId].openPopup();
+          // keep id cached for potential manual reopen, but do not auto-open
         }
       }
 
