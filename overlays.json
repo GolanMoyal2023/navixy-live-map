@@ -1,0 +1,32 @@
+[
+  {
+    "id": "ADC",
+    "name": "LLBG ADC",
+    "image": "overlays/ADC.png",
+    "opacity": 0.45
+  },
+  {
+    "id": "APDC-3",
+    "name": "LLBG APDC-3",
+    "image": "overlays/APDC-3.png",
+    "opacity": 0.45
+  },
+  {
+    "id": "APDCHX",
+    "name": "LLBG APDCHX",
+    "image": "overlays/APDCHX.png",
+    "opacity": 0.45
+  },
+  {
+    "id": "APDCT1",
+    "name": "LLBG APDCT1",
+    "image": "overlays/APDCT1.png",
+    "opacity": 0.45
+  },
+  {
+    "id": "APDCV",
+    "name": "LLBG APDCV",
+    "image": "overlays/APDCV.png",
+    "opacity": 0.45
+  }
+]

@@ -76,6 +76,7 @@
       const map = L.map("map").setView([32.004, 34.876], 13);
       const layer = L.layerGroup().addTo(map);
       const llbgLayer = L.layerGroup();
+      const chartLayers = {};
 
       const osmStreets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
@@ -100,7 +101,7 @@
       const overlayLayers = {
         "LLBG Gates/Zones": llbgLayer,
       };
-      L.control
+      const layersControl = L.control
         .layers(
           baseLayers,
           overlayLayers,
@@ -314,6 +315,22 @@
             },
           }).addTo(llbgLayer);
           llbgLayer.addTo(map);
+        })
+        .catch(() => {});
+
+      fetch("overlays.json")
+        .then((res) => res.json())
+        .then((items) => {
+          items.forEach((item) => {
+            const bounds = [
+              [31.95, 34.80],
+              [32.06, 34.95],
+            ];
+            const overlay = L.imageOverlay(item.image, bounds, { opacity: item.opacity ?? 0.45 });
+            chartLayers[item.name] = overlay;
+            overlayLayers[item.name] = overlay;
+            layersControl.addOverlay(overlay, item.name);
+          });
         })
         .catch(() => {});
     </script>
