@@ -33,12 +33,28 @@
         font-family: "Segoe UI", Arial, sans-serif;
         font-size: 12px;
         z-index: 1000;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      #clearPopup {
+        background: #1f2937;
+        border: 1px solid #374151;
+        color: #ffffff;
+        padding: 2px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 11px;
       }
     </style>
   </head>
   <body>
     <div id="map"></div>
-    <div class="map-overlay" id="mapStatus">Loading...</div>
+    <div class="map-overlay">
+      <span id="mapStatus">Loading...</span>
+      <button id="clearPopup" type="button">Clear</button>
+    </div>
 
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -81,8 +97,15 @@
       const markers = {};
       let fitted = false;
       let activePopupId = null;
-      let activePopupUntil = null;
       const iconCache = new Map();
+      const clearButton = document.getElementById("clearPopup");
+
+      if (clearButton) {
+        clearButton.addEventListener("click", () => {
+          Object.values(markers).forEach((marker) => marker.closePopup());
+          activePopupId = null;
+        });
+      }
 
       function iconPathForRow(row) {
         const label = String(row.label || "").toLowerCase();
@@ -200,15 +223,12 @@
             .bindTooltip(label, { permanent: true, direction: "top", offset: [0, -12] });
           marker.off("click", marker._openPopup);
           marker.on("click", () => {
-            Object.values(markers).forEach((m) => m.closePopup());
             marker.openPopup();
             activePopupId = id;
-            activePopupUntil = Date.now() + 10000;
           });
           marker.on("popupclose", () => {
             if (activePopupId === id) {
               activePopupId = null;
-              activePopupUntil = null;
             }
           });
           markers[id] = marker;
@@ -232,12 +252,7 @@
           fitted = true;
         }
         if (activePopupId && markers[activePopupId]) {
-          if (activePopupUntil && Date.now() <= activePopupUntil) {
-            markers[activePopupId].openPopup();
-          } else {
-            activePopupId = null;
-            activePopupUntil = null;
-          }
+          markers[activePopupId].openPopup();
         }
       }
 
