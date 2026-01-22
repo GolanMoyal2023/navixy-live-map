@@ -47,6 +47,15 @@
         cursor: pointer;
         font-size: 11px;
       }
+
+      .llbg-label {
+        background: rgba(255, 255, 255, 0.9);
+        color: #4c1d95;
+        border: 1px solid #c4b5fd;
+        border-radius: 4px;
+        padding: 1px 4px;
+        font-size: 10px;
+      }
     </style>
   </head>
   <body>
@@ -286,16 +295,21 @@
           L.geoJSON(data, {
             pointToLayer: (feature, latlng) =>
               L.circleMarker(latlng, {
-                radius: 4,
-                color: "#2563eb",
-                fillColor: "#2563eb",
-                fillOpacity: 0.8,
-                weight: 1,
+                radius: 7,
+                color: "#7c3aed",
+                fillColor: "#a855f7",
+                fillOpacity: 0.9,
+                weight: 2,
               }),
             onEachFeature: (feature, layer) => {
               const name = feature.properties?.name || "LLBG point";
               const source = feature.properties?.source || "";
-              layer.bindTooltip(`${name}`, { direction: "top" });
+              layer.bindTooltip(`${name}`, {
+                direction: "top",
+                permanent: true,
+                opacity: 0.9,
+                className: "llbg-label",
+              });
               layer.bindPopup(`${name}<br/>${source}`);
             },
           }).addTo(llbgLayer);
