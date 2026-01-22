@@ -1,0 +1,565 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 1",
+        "source": "LL_AD_2_LLBG_APDC-3_v1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89823055555556,
+          31.993633333333335
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 2",
+        "source": "LL_AD_2_LLBG_APDC-3_v1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.901263888888884,
+          31.99458611111111
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 3",
+        "source": "LL_AD_2_LLBG_APDC-3_v1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.898491666666665,
+          31.994266666666668
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 4",
+        "source": "LL_AD_2_LLBG_APDC-3_v1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.90094166666667,
+          31.99418888888889
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 5",
+        "source": "LL_AD_2_LLBG_APDC-3_v1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89874722222222,
+          31.99491666666667
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 6",
+        "source": "LL_AD_2_LLBG_APDC-3_v1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.90063611111111,
+          31.993822222222224
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 7",
+        "source": "LL_AD_2_LLBG_APDC-3_v1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89896666666667,
+          31.995575000000002
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 8",
+        "source": "LL_AD_2_LLBG_APDC-3_v1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.90009166666667,
+          31.993455555555556
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 9",
+        "source": "LL_AD_2_LLBG_APDC-3_v1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89918333333333,
+          31.99310277777778
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 1",
+        "source": "LL_AD_2_LLBG_APDCHX_V1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.88533611111111,
+          31.999725
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 2",
+        "source": "LL_AD_2_LLBG_APDCHX_V1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.884613888888886,
+          32.00095
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 3",
+        "source": "LL_AD_2_LLBG_APDCHX_V1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.88491944444444,
+          32.00241666666667
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 4",
+        "source": "LL_AD_2_LLBG_APDCHX_V1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.881461111111115,
+          32.00116666666667
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 5",
+        "source": "LL_AD_2_LLBG_APDCHX_V1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.884502777777776,
+          32.00185833333333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 6",
+        "source": "LL_AD_2_LLBG_APDCHX_V1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.88106111111111,
+          32.001380555555556
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 7",
+        "source": "LL_AD_2_LLBG_APDCHX_V1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.88408611111111,
+          32.0013
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 8",
+        "source": "LL_AD_2_LLBG_APDCHX_V1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.88066388888889,
+          32.00058888888889
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 9",
+        "source": "LL_AD_2_LLBG_APDCHX_V1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.88295277777778,
+          32.000372222222225
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 10",
+        "source": "LL_AD_2_LLBG_APDCHX_V1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.88336666666667,
+          32.00015833333333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 11",
+        "source": "LL_AD_2_LLBG_APDCHX_V1_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.883783333333334,
+          31.99994166666667
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 1",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89684166666667,
+          32.0092
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 2",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89743611111111,
+          32.00221388888889
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 3",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89705,
+          32.00891388888889
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 4",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89725,
+          32.00279166666667
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 5",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.896741666666664,
+          32.00605
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 6",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.897419444444445,
+          32.007825
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 7",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89655,
+          32.003544444444444
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 8",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.897083333333335,
+          32.007527777777774
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 9",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89635833333333,
+          32.006375
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 10",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89723055555555,
+          32.00723055555556
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 11",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.896166666666666,
+          32.006680555555555
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 12",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89742777777778,
+          32.006933333333336
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 13",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.895975,
+          32.00698611111111
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 14",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.897625,
+          32.00663611111111
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 15",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.895783333333334,
+          32.00736111111111
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 16",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.897727777777774,
+          32.00767222222222
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 17",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.897930555555554,
+          32.007983333333335
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 18",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.898130555555554,
+          32.008294444444445
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 19",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89833055555555,
+          32.008605555555555
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "LLBG point 20",
+        "source": "LL_AD_2_LLBG_APDCV_en.pdf"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          34.89853055555555,
+          32.00948888888889
+        ]
+      }
+    }
+  ]
+}

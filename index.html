@@ -66,6 +66,7 @@
       const POLL_INTERVAL_MS = 2000;
       const map = L.map("map").setView([32.004, 34.876], 13);
       const layer = L.layerGroup().addTo(map);
+      const llbgLayer = L.layerGroup();
 
       const osmStreets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
@@ -82,14 +83,18 @@
           attribution: "Tiles &copy; Esri",
         }
       );
+      const baseLayers = {
+        "OSM streets": osmStreets,
+        OSM: osmStandard,
+        "Satellite (Esri)": esriSat,
+      };
+      const overlayLayers = {
+        "LLBG Gates/Zones": llbgLayer,
+      };
       L.control
         .layers(
-          {
-            "OSM streets": osmStreets,
-            OSM: osmStandard,
-            "Satellite (Esri)": esriSat,
-          },
-          {},
+          baseLayers,
+          overlayLayers,
           { position: "topright" }
         )
         .addTo(map);
@@ -274,6 +279,29 @@
 
       loadData();
       setInterval(loadData, POLL_INTERVAL_MS);
+
+      fetch("llbg_layers.geojson")
+        .then((res) => res.json())
+        .then((data) => {
+          L.geoJSON(data, {
+            pointToLayer: (feature, latlng) =>
+              L.circleMarker(latlng, {
+                radius: 4,
+                color: "#2563eb",
+                fillColor: "#2563eb",
+                fillOpacity: 0.8,
+                weight: 1,
+              }),
+            onEachFeature: (feature, layer) => {
+              const name = feature.properties?.name || "LLBG point";
+              const source = feature.properties?.source || "";
+              layer.bindTooltip(`${name}`, { direction: "top" });
+              layer.bindPopup(`${name}<br/>${source}`);
+            },
+          }).addTo(llbgLayer);
+          llbgLayer.addTo(map);
+        })
+        .catch(() => {});
     </script>
   </body>
 </html>
