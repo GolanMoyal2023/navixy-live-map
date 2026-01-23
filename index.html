@@ -50,13 +50,18 @@
 
       .map-overlay.debug {
         top: 48px;
+        background: rgba(148, 163, 184, 0.5);
+        color: #0f172a;
       }
 
       .map-overlay.legend {
-        top: 84px;
+        top: auto;
+        bottom: 12px;
         flex-direction: column;
         align-items: flex-start;
         gap: 6px;
+        background: rgba(148, 163, 184, 0.5);
+        color: #0f172a;
       }
 
       .legend-row {
@@ -70,7 +75,7 @@
         width: 12px;
         height: 12px;
         border-radius: 3px;
-        border: 1px solid rgba(255, 255, 255, 0.6);
+        border: 1px solid rgba(15, 23, 42, 0.4);
       }
 
       .hidden {
@@ -643,21 +648,7 @@
         })
         .catch(() => {});
 
-      fetch("overlays.json")
-        .then((res) => res.json())
-        .then((items) => {
-          items.forEach((item) => {
-            const bounds = [
-              [31.95, 34.80],
-              [32.06, 34.95],
-            ];
-            const overlay = L.imageOverlay(item.image, bounds, { opacity: item.opacity ?? 0.45 });
-            chartLayers[item.name] = overlay;
-            overlayLayers[item.name] = overlay;
-            layersControl.addOverlay(overlay, item.name);
-          });
-        })
-        .catch(() => {});
+      // Removed LLBG chart overlays from the layer list.
     </script>
   </body>
 </html>
