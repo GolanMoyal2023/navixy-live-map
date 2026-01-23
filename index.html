@@ -22,6 +22,77 @@
         width: 100%;
       }
 
+      .view-tabs {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        z-index: 1000;
+        display: flex;
+        gap: 6px;
+      }
+
+      .view-tab {
+        background: rgba(17, 24, 39, 0.85);
+        color: #ffffff;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      .view-tab.active {
+        background: #2563eb;
+        border-color: #1d4ed8;
+      }
+
+      .view-panel {
+        display: none;
+        height: 100%;
+        width: 100%;
+        position: relative;
+      }
+
+      .view-panel.active {
+        display: block;
+      }
+
+      .table-view {
+        height: 100%;
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+
+      .table-container {
+        max-height: calc(100% - 16px);
+        overflow: auto;
+        border: 1px solid #1f2937;
+        border-radius: 8px;
+      }
+
+      table.gse-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      table.gse-table th,
+      table.gse-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid #1f2937;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      table.gse-table th {
+        position: sticky;
+        top: 0;
+        background: #111827;
+        z-index: 1;
+      }
+
       .map-overlay {
         position: absolute;
         top: 12px;
@@ -121,24 +192,48 @@
     </style>
   </head>
   <body>
-    <div id="map"></div>
-    <div class="map-overlay">
-      <span id="mapStatus">Loading...</span>
-      <button id="clearPopup" type="button">Clear</button>
+    <div class="view-tabs">
+      <button class="view-tab active" data-view="map">Map</button>
+      <button class="view-tab" data-view="table">Table</button>
     </div>
-    <div id="debugOverlay" class="map-overlay debug hidden">
-      <span id="mapDebug">debug</span>
+    <div id="mapView" class="view-panel active">
+      <div id="map"></div>
+      <div class="map-overlay">
+        <span id="mapStatus">Loading...</span>
+        <button id="clearPopup" type="button">Clear</button>
+      </div>
+      <div id="debugOverlay" class="map-overlay debug hidden">
+        <span id="mapDebug">debug</span>
+      </div>
+      <div id="legendOverlay" class="map-overlay legend hidden">
+        <div class="legend-row"><span class="legend-swatch gse-status-available"></span>Available</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-in-use"></span>In use</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-moving"></span>Moving</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-idle"></span>Idle</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-ignition"></span>Ignition on</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-working"></span>Working</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-maintenance"></span>Maintenance</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-low-battery"></span>Low battery</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-alert"></span>Alert</div>
+      </div>
     </div>
-    <div id="legendOverlay" class="map-overlay legend hidden">
-      <div class="legend-row"><span class="legend-swatch gse-status-available"></span>Available</div>
-      <div class="legend-row"><span class="legend-swatch gse-status-in-use"></span>In use</div>
-      <div class="legend-row"><span class="legend-swatch gse-status-moving"></span>Moving</div>
-      <div class="legend-row"><span class="legend-swatch gse-status-idle"></span>Idle</div>
-      <div class="legend-row"><span class="legend-swatch gse-status-ignition"></span>Ignition on</div>
-      <div class="legend-row"><span class="legend-swatch gse-status-working"></span>Working</div>
-      <div class="legend-row"><span class="legend-swatch gse-status-maintenance"></span>Maintenance</div>
-      <div class="legend-row"><span class="legend-swatch gse-status-low-battery"></span>Low battery</div>
-      <div class="legend-row"><span class="legend-swatch gse-status-alert"></span>Alert</div>
+    <div id="tableView" class="view-panel table-view">
+      <div class="table-container">
+        <table class="gse-table">
+          <thead>
+            <tr>
+              <th>GSE</th>
+              <th>Last report</th>
+              <th>Status</th>
+              <th>Sensor</th>
+              <th>Beacon</th>
+              <th>Near gate</th>
+              <th>Next service</th>
+            </tr>
+          </thead>
+          <tbody id="gseTableBody"></tbody>
+        </table>
+      </div>
     </div>
 
     <script
@@ -193,6 +288,7 @@
       let fitted = false;
       let activePopupId = null;
       let isRefreshing = false;
+      let lastRows = [];
       const iconCache = new Map();
       const lastPositions = new Map();
       const clearButton = document.getElementById("clearPopup");
@@ -205,6 +301,25 @@
           activePopupId = null;
         });
       }
+
+      const viewTabs = document.querySelectorAll(".view-tab");
+      const mapView = document.getElementById("mapView");
+      const tableView = document.getElementById("tableView");
+      viewTabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+          viewTabs.forEach((t) => t.classList.remove("active"));
+          tab.classList.add("active");
+          const view = tab.dataset.view;
+          if (view === "table") {
+            mapView.classList.remove("active");
+            tableView.classList.add("active");
+          } else {
+            tableView.classList.remove("active");
+            mapView.classList.add("active");
+            map.invalidateSize();
+          }
+        });
+      });
 
       map.on("overlayadd", (event) => {
         if (event.layer === debugLayer && debugOverlay) {
@@ -483,6 +598,71 @@
         }
       }
 
+      function formatLabel(row) {
+        const label = row.label || row.tracker_id || "";
+        const match = String(label).match(/(\d{4})/);
+        return match ? match[1] : String(label);
+      }
+
+      function formatStatus(row) {
+        return row.movement_status || row.connection_status || "--";
+      }
+
+      function formatSensor(row) {
+        const parts = [];
+        const add = (name, value) => {
+          if (value !== null && value !== undefined && value !== "") {
+            parts.push(`${name}:${value}`);
+          }
+        };
+        add("Fuel", row.Fuel_level ?? row.Fuel);
+        add("Voltage", row["Board voltage"] ?? row.Voltage ?? row.voltage);
+        add("EngTemp", row.Engine_Temp ?? row.engine_temperature);
+        add("EngOP", row["Engine_O.P"]);
+        add("RPM", row.engine_rpm);
+        return parts.length ? parts.join(" | ") : "--";
+      }
+
+      function formatBeacon(row) {
+        const parts = [];
+        const add = (name, value) => {
+          if (value !== null && value !== undefined && value !== "") {
+            parts.push(`${name}:${value}`);
+          }
+        };
+        add("BLE", row["BLE: ID"]);
+        add("EyeBecon", row.EyeBecon);
+        add("Key", row["Hardware key"]);
+        return parts.length ? parts.join(" | ") : "--";
+      }
+
+      function renderTable(rows) {
+        const body = document.getElementById("gseTableBody");
+        if (!body) {
+          return;
+        }
+        body.innerHTML = rows
+          .map((row) => {
+            const gse = formatLabel(row);
+            const last = row.last_update || row.gps_updated || "--";
+            const status = formatStatus(row);
+            const sensor = formatSensor(row);
+            const beacon = formatBeacon(row);
+            const gate = row.nearest_gate || "--";
+            const next = row.next_service_hours ?? "--";
+            return `<tr>
+              <td>${gse}</td>
+              <td>${last}</td>
+              <td>${status}</td>
+              <td>${sensor}</td>
+              <td>${beacon}</td>
+              <td>${gate}</td>
+              <td>${next}</td>
+            </tr>`;
+          })
+          .join("");
+      }
+
       function popupHtml(row) {
         const label = row.label || row.tracker_id || "tracker";
         const lat = row.lat;
@@ -609,7 +789,9 @@
             throw new Error("fetch failed");
           }
           const payload = await response.json();
-          updateMarkers(payload.rows || []);
+          lastRows = payload.rows || [];
+          updateMarkers(lastRows);
+          renderTable(lastRows);
         } catch (error) {
           const statusEl = document.getElementById("mapStatus");
           if (statusEl) {
