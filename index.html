@@ -81,6 +81,7 @@
     <div id="map"></div>
     <div class="map-overlay">
       <span id="mapStatus">Loading...</span>
+      <span id="mapDebug"></span>
       <button id="clearPopup" type="button">Clear</button>
     </div>
 
@@ -178,7 +179,8 @@
       }
 
       function markerSizeForZoom(zoom) {
-        const size = 14 + (zoom - 10) * 3;
+        const safeZoom = Number.isFinite(zoom) ? zoom : 13;
+        const size = 14 + (safeZoom - 10) * 3;
         return Math.max(20, Math.min(56, Math.round(size)));
       }
 
@@ -428,6 +430,9 @@
 
       function updateMarkers(rows) {
         isRefreshing = true;
+        if (!map.hasLayer(layer)) {
+          layer.addTo(map);
+        }
         const bounds = [];
         const seen = new Set();
         rows.forEach((row) => {
@@ -439,7 +444,7 @@
           const label = row.label || row.tracker_id || "tracker";
           const shortMatch = String(label).match(/(\d{4})/);
           const shortLabel = shortMatch ? shortMatch[1] : label;
-          const id = row.tracker_id || label;
+          const id = String(row.tracker_id || label);
           const iconPath = iconPathForRow(row);
           const size = markerSizeForZoom(map.getZoom());
           const distanceMetersValue = updateDistance(id, lat, lng);
@@ -492,8 +497,16 @@
         });
 
         const statusEl = document.getElementById("mapStatus");
+        const debugEl = document.getElementById("mapDebug");
         if (statusEl) {
           statusEl.textContent = `Trackers: ${rows.length} | Markers: ${bounds.length}`;
+        }
+        if (debugEl) {
+          const first = rows.find((row) => Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lng)));
+          const zoom = map.getZoom();
+          debugEl.textContent = first
+            ? `| zoom ${zoom} | ${Number(first.lat).toFixed(5)}, ${Number(first.lng).toFixed(5)}`
+            : `| zoom ${zoom} | no lat/lng`;
         }
 
         if (!fitted) {
