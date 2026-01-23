@@ -48,6 +48,35 @@
         font-size: 11px;
       }
 
+      .map-overlay.debug {
+        top: 48px;
+      }
+
+      .map-overlay.legend {
+        top: 84px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+      }
+
+      .legend-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+      }
+
+      .legend-swatch {
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.6);
+      }
+
+      .hidden {
+        display: none;
+      }
+
       .llbg-label {
         background: rgba(255, 255, 255, 0.9);
         color: #4c1d95;
@@ -66,23 +95,45 @@
         border: 1px solid rgba(0, 0, 0, 0.25) !important;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
       }
-      .leaflet-tooltip.gse-status-available { background: #00a651 !important; }
-      .leaflet-tooltip.gse-status-in-use { background: #e53935 !important; }
-      .leaflet-tooltip.gse-status-moving { background: #1e88e5 !important; }
-      .leaflet-tooltip.gse-status-idle { background: #e91e63 !important; }
-      .leaflet-tooltip.gse-status-ignition { background: #fdd835 !important; color: #111827 !important; }
-      .leaflet-tooltip.gse-status-working { background: #7b1fa2 !important; }
-      .leaflet-tooltip.gse-status-maintenance { background: #fb8c00 !important; }
-      .leaflet-tooltip.gse-status-low-battery { background: #fbc02d !important; color: #111827 !important; }
-      .leaflet-tooltip.gse-status-alert { background: #ef6c00 !important; }
+      .leaflet-tooltip.gse-status-available,
+      .legend-swatch.gse-status-available { background: #00a651 !important; }
+      .leaflet-tooltip.gse-status-in-use,
+      .legend-swatch.gse-status-in-use { background: #e53935 !important; }
+      .leaflet-tooltip.gse-status-moving,
+      .legend-swatch.gse-status-moving { background: #1e88e5 !important; }
+      .leaflet-tooltip.gse-status-idle,
+      .legend-swatch.gse-status-idle { background: #e91e63 !important; }
+      .leaflet-tooltip.gse-status-ignition,
+      .legend-swatch.gse-status-ignition { background: #fdd835 !important; color: #111827 !important; }
+      .leaflet-tooltip.gse-status-working,
+      .legend-swatch.gse-status-working { background: #7b1fa2 !important; }
+      .leaflet-tooltip.gse-status-maintenance,
+      .legend-swatch.gse-status-maintenance { background: #fb8c00 !important; }
+      .leaflet-tooltip.gse-status-low-battery,
+      .legend-swatch.gse-status-low-battery { background: #fbc02d !important; color: #111827 !important; }
+      .leaflet-tooltip.gse-status-alert,
+      .legend-swatch.gse-status-alert { background: #ef6c00 !important; }
     </style>
   </head>
   <body>
     <div id="map"></div>
     <div class="map-overlay">
       <span id="mapStatus">Loading...</span>
-      <span id="mapDebug"></span>
       <button id="clearPopup" type="button">Clear</button>
+    </div>
+    <div id="debugOverlay" class="map-overlay debug hidden">
+      <span id="mapDebug">debug</span>
+    </div>
+    <div id="legendOverlay" class="map-overlay legend hidden">
+      <div class="legend-row"><span class="legend-swatch gse-status-available"></span>Available</div>
+      <div class="legend-row"><span class="legend-swatch gse-status-in-use"></span>In use</div>
+      <div class="legend-row"><span class="legend-swatch gse-status-moving"></span>Moving</div>
+      <div class="legend-row"><span class="legend-swatch gse-status-idle"></span>Idle</div>
+      <div class="legend-row"><span class="legend-swatch gse-status-ignition"></span>Ignition on</div>
+      <div class="legend-row"><span class="legend-swatch gse-status-working"></span>Working</div>
+      <div class="legend-row"><span class="legend-swatch gse-status-maintenance"></span>Maintenance</div>
+      <div class="legend-row"><span class="legend-swatch gse-status-low-battery"></span>Low battery</div>
+      <div class="legend-row"><span class="legend-swatch gse-status-alert"></span>Alert</div>
     </div>
 
     <script
@@ -96,6 +147,8 @@
       const map = L.map("map").setView([32.004, 34.876], 13);
       const layer = L.layerGroup().addTo(map);
       const llbgLayer = L.layerGroup();
+      const debugLayer = L.layerGroup();
+      const legendLayer = L.layerGroup();
       const chartLayers = {};
 
       const osmStreets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -128,6 +181,8 @@
           { position: "topright" }
         )
         .addTo(map);
+      layersControl.addOverlay(debugLayer, "Debug");
+      layersControl.addOverlay(legendLayer, "GSE Legend");
 
       const markers = {};
       let fitted = false;
@@ -136,6 +191,8 @@
       const iconCache = new Map();
       const lastPositions = new Map();
       const clearButton = document.getElementById("clearPopup");
+      const debugOverlay = document.getElementById("debugOverlay");
+      const legendOverlay = document.getElementById("legendOverlay");
 
       if (clearButton) {
         clearButton.addEventListener("click", () => {
@@ -143,6 +200,23 @@
           activePopupId = null;
         });
       }
+
+      map.on("overlayadd", (event) => {
+        if (event.layer === debugLayer && debugOverlay) {
+          debugOverlay.classList.remove("hidden");
+        }
+        if (event.layer === legendLayer && legendOverlay) {
+          legendOverlay.classList.remove("hidden");
+        }
+      });
+      map.on("overlayremove", (event) => {
+        if (event.layer === debugLayer && debugOverlay) {
+          debugOverlay.classList.add("hidden");
+        }
+        if (event.layer === legendLayer && legendOverlay) {
+          legendOverlay.classList.add("hidden");
+        }
+      });
 
       function iconPathForRow(row) {
         const label = String(row.label || "").toLowerCase();
