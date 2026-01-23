@@ -112,6 +112,7 @@
       const markers = {};
       let fitted = false;
       let activePopupId = null;
+      let isRefreshing = false;
       const iconCache = new Map();
       const clearButton = document.getElementById("clearPopup");
 
@@ -216,6 +217,7 @@
       }
 
       function updateMarkers(rows) {
+        isRefreshing = true;
         layer.clearLayers();
         const bounds = [];
         Object.keys(markers).forEach((key) => delete markers[key]);
@@ -227,6 +229,8 @@
           }
           const status = row.connection_status || "unknown";
           const label = row.label || row.tracker_id || "tracker";
+          const shortMatch = String(label).match(/(\d{4})/);
+          const shortLabel = shortMatch ? shortMatch[1] : label;
           const id = row.tracker_id || label;
           const iconPath = iconPathForRow(row);
           const size = markerSizeForZoom(map.getZoom());
@@ -235,13 +239,16 @@
             iconPath,
           })
             .bindPopup(popupHtml(row))
-            .bindTooltip(label, { permanent: true, direction: "top", offset: [0, -12] });
+            .bindTooltip(shortLabel, { permanent: true, direction: "top", offset: [0, -12] });
           marker.off("click", marker._openPopup);
           marker.on("click", () => {
             marker.openPopup();
             activePopupId = id;
           });
           marker.on("popupclose", () => {
+            if (isRefreshing) {
+              return;
+            }
             if (activePopupId === id) {
               activePopupId = null;
             }
@@ -269,6 +276,7 @@
         if (activePopupId && markers[activePopupId]) {
           markers[activePopupId].openPopup();
         }
+        isRefreshing = false;
       }
 
       async function loadData() {
@@ -314,7 +322,6 @@
               layer.bindPopup(`${name}<br/>${source}`);
             },
           }).addTo(llbgLayer);
-          llbgLayer.addTo(map);
         })
         .catch(() => {});
 
