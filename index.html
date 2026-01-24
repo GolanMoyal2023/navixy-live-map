@@ -174,7 +174,7 @@
       .leaflet-tooltip.gse-status-available,
       .legend-swatch.gse-status-available { background: #00a651 !important; }
       .leaflet-tooltip.gse-status-in-use,
-      .legend-swatch.gse-status-in-use { background: #e53935 !important; }
+      .legend-swatch.gse-status-in-use { background: #f97316 !important; }
       .leaflet-tooltip.gse-status-moving,
       .legend-swatch.gse-status-moving { background: #1e88e5 !important; }
       .leaflet-tooltip.gse-status-idle,
@@ -182,7 +182,7 @@
       .leaflet-tooltip.gse-status-ignition,
       .legend-swatch.gse-status-ignition { background: #fdd835 !important; color: #111827 !important; }
       .leaflet-tooltip.gse-status-working,
-      .legend-swatch.gse-status-working { background: #7b1fa2 !important; }
+      .legend-swatch.gse-status-working { background: #e53935 !important; }
       .leaflet-tooltip.gse-status-maintenance,
       .legend-swatch.gse-status-maintenance { background: #fb8c00 !important; }
       .leaflet-tooltip.gse-status-low-battery,
@@ -297,7 +297,9 @@
         "odometer",
         "engine_hours",
         "Board voltage",
+        "Board voltage__updated",
         "Fuel_level",
+        "Fuel_level__updated",
         "GSE_Dashboard_warnings",
         "ac_moves_count",
         "brake_pressure_actual",
@@ -310,18 +312,27 @@
         "engine_hours_total",
         "engine_hours_with_ac",
         "engine_rpm",
+        "engine_rpm__updated",
         "gotis_status",
         "next_service_hours",
         "pickup_state",
         "Gottis",
         "Moving",
+        "Moving__updated",
         "Pup_State",
         "Engine_Temp",
+        "Engine_Temp__updated",
         "Engine_O.P",
+        "Engine_O.P__updated",
         "Fuel",
+        "Fuel__updated",
         "BLE: ID",
         "EyeBecon",
         "Hardware key",
+        "Hardware key__updated",
+        "Ignition",
+        "Ignition__updated",
+        "Working__updated",
         "OBD: Absolute load value",
         "OBD: Control module voltage",
         "OBD: Coolant temperature",
@@ -541,6 +552,9 @@
         if (moving) {
           return false;
         }
+        if (isIgnitionOn(row)) {
+          return true;
+        }
         const workingFlag =
           parseBoolean(row.Working) ||
           parseBoolean(row.working) ||
@@ -603,6 +617,9 @@
             return "gse-status-low-battery";
           }
         }
+        if (isWorking(row, moving)) {
+          return "gse-status-working";
+        }
         if (navixyStatus.includes("moving")) {
           return "gse-status-moving";
         }
@@ -618,9 +635,6 @@
         }
         if (navixyStatus.includes("offline")) {
           return "gse-status-stop";
-        }
-        if (isWorking(row, moving)) {
-          return "gse-status-working";
         }
         if (moving || distanceMetersValue > MOVE_DISTANCE_METERS) {
           return "gse-status-moving";
@@ -698,12 +712,19 @@
         if (!head || !body) {
           return;
         }
-        head.innerHTML = `<tr>${DASHBOARD_HEADERS.map((h) => `<th>${h}</th>`).join("")}</tr>`;
+        const headers = DASHBOARD_HEADERS.flatMap((h) => (h === "label" ? ["label", "label_updated"] : [h]));
+        head.innerHTML = `<tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr>`;
         body.innerHTML = rows
           .map((row) => {
-            const cells = DASHBOARD_HEADERS.map((h) => {
+            const cells = headers.map((h) => {
               if (h === "label") {
                 return formatLabel(row);
+              }
+              if (h === "label_updated") {
+                return row.last_update || row.gps_updated || "--";
+              }
+              if (h.endsWith("__updated")) {
+                return row[h] ?? "--";
               }
               return row[h] ?? "--";
             })
@@ -721,16 +742,32 @@
         const status = statusLabel(row);
         const base = `<strong>${label}</strong><br/>${status}<br/>${lat}, ${lng}`;
         const extra = [];
+        const ignition = isIgnitionOn(row) ? "on" : "off";
+        const ignitionUpdated = row["Ignition__updated"] ?? row["ignition__updated"];
+        extra.push(`Ignition: ${ignition}${ignitionUpdated ? ` (updated ${ignitionUpdated})` : ""}`);
         if (label.includes("6074")) {
-          extra.push(`Engine_Temp: ${row.Engine_Temp ?? "--"}`);
-          extra.push(`Engine_O.P: ${row["Engine_O.P"] ?? "--"}`);
-          extra.push(`Fuel: ${row.Fuel ?? "--"}`);
+          const tempUpdated = row["Engine_Temp__updated"];
+          const opUpdated = row["Engine_O.P__updated"];
+          const fuelUpdated = row["Fuel__updated"];
+          extra.push(
+            `Engine_Temp: ${row.Engine_Temp ?? "--"}${tempUpdated ? ` (updated ${tempUpdated})` : ""}`
+          );
+          extra.push(
+            `Engine_O.P: ${row["Engine_O.P"] ?? "--"}${opUpdated ? ` (updated ${opUpdated})` : ""}`
+          );
+          extra.push(`Fuel: ${row.Fuel ?? "--"}${fuelUpdated ? ` (updated ${fuelUpdated})` : ""}`);
           extra.push(`Engine Hours: ${row.engine_hours ?? "--"}`);
           extra.push(`Odometer: ${row.odometer ?? "--"}`);
         }
         if (label.includes("5032")) {
-          extra.push(`Fuel_level: ${row.Fuel_level ?? "--"}`);
-          extra.push(`Engine RPM: ${row.engine_rpm ?? "--"}`);
+          const fuelLevelUpdated = row["Fuel_level__updated"];
+          const rpmUpdated = row["engine_rpm__updated"];
+          extra.push(
+            `Fuel_level: ${row.Fuel_level ?? "--"}${fuelLevelUpdated ? ` (updated ${fuelLevelUpdated})` : ""}`
+          );
+          extra.push(
+            `Engine RPM: ${row.engine_rpm ?? "--"}${rpmUpdated ? ` (updated ${rpmUpdated})` : ""}`
+          );
           extra.push(`Engine Hours: ${row.engine_hours_total ?? row.engine_hours ?? "--"}`);
           extra.push(`Next Service: ${row.next_service_hours ?? "--"}`);
           extra.push(`Odometer: ${row.odometer ?? "--"}`);
