@@ -767,6 +767,10 @@
         const ignition = isIgnitionOn(row) ? "on" : "off";
         const ignitionUpdated = row["Ignition__updated"] ?? row["ignition__updated"];
         extra.push(`Ignition: ${ignition}${ignitionUpdated ? ` (updated ${ignitionUpdated})` : ""}`);
+        const statusUpdated = row.last_update || row.gps_updated;
+        if (statusUpdated) {
+          extra.push(`Status updated: ${statusUpdated}`);
+        }
         if (sensorUpdated) {
           extra.push(`Sensors updated: ${sensorUpdated}`);
         }
