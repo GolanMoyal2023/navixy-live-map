@@ -742,9 +742,34 @@
         const status = statusLabel(row);
         const base = `<strong>${label}</strong><br/>${status}<br/>${lat}, ${lng}`;
         const extra = [];
+        const sensorUpdated = (() => {
+          const candidates = Object.keys(row || {})
+            .filter((key) => key.endsWith("__updated"))
+            .map((key) => row[key])
+            .filter(Boolean);
+          let latestRaw = null;
+          let latestTime = null;
+          candidates.forEach((value) => {
+            const parsed = Date.parse(value);
+            if (Number.isNaN(parsed)) {
+              if (!latestRaw) {
+                latestRaw = value;
+              }
+              return;
+            }
+            if (latestTime === null || parsed > latestTime) {
+              latestTime = parsed;
+              latestRaw = value;
+            }
+          });
+          return latestRaw;
+        })();
         const ignition = isIgnitionOn(row) ? "on" : "off";
         const ignitionUpdated = row["Ignition__updated"] ?? row["ignition__updated"];
         extra.push(`Ignition: ${ignition}${ignitionUpdated ? ` (updated ${ignitionUpdated})` : ""}`);
+        if (sensorUpdated) {
+          extra.push(`Sensors updated: ${sensorUpdated}`);
+        }
         if (label.includes("6074")) {
           const tempUpdated = row["Engine_Temp__updated"];
           const opUpdated = row["Engine_O.P__updated"];
