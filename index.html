@@ -769,10 +769,10 @@
         extra.push(`Ignition: ${ignition}${ignitionUpdated ? ` (updated ${ignitionUpdated})` : ""}`);
         const statusUpdated = row.last_update || row.gps_updated;
         if (statusUpdated) {
-          extra.push(`Status updated: ${statusUpdated}`);
+          extra.push(`Last status report: ${statusUpdated}`);
         }
         if (sensorUpdated) {
-          extra.push(`Sensors updated: ${sensorUpdated}`);
+          extra.push(`Last sensor report: ${sensorUpdated}`);
         }
         if (label.includes("6074")) {
           const tempUpdated = row["Engine_Temp__updated"];
