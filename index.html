@@ -22,81 +22,10 @@
         width: 100%;
       }
 
-      .view-tabs {
-        position: absolute;
-        top: 72px;
-        right: 12px;
-        z-index: 1000;
-        display: flex;
-        gap: 6px;
-      }
-
-      .view-tab {
-        background: rgba(17, 24, 39, 0.85);
-        color: #ffffff;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 6px;
-        padding: 4px 10px;
-        cursor: pointer;
-        font-size: 12px;
-      }
-
-      .view-tab.active {
-        background: #2563eb;
-        border-color: #1d4ed8;
-      }
-
-      .view-panel {
-        display: none;
-        height: 100%;
-        width: 100%;
-        position: relative;
-      }
-
-      .view-panel.active {
-        display: block;
-      }
-
-      .table-view {
-        height: 100%;
-        background: #0f172a;
-        color: #e2e8f0;
-        padding: 16px;
-        box-sizing: border-box;
-      }
-
-      .table-container {
-        max-height: calc(100% - 16px);
-        overflow: auto;
-        border: 1px solid #1f2937;
-        border-radius: 8px;
-      }
-
-      table.gse-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 12px;
-      }
-
-      table.gse-table th,
-      table.gse-table td {
-        padding: 8px 10px;
-        border-bottom: 1px solid #1f2937;
-        text-align: left;
-        vertical-align: top;
-      }
-
-      table.gse-table th {
-        position: sticky;
-        top: 0;
-        background: #111827;
-        z-index: 1;
-      }
-
       .map-overlay {
         position: absolute;
         top: 12px;
-        left: 56px;
+        left: 12px;
         background: rgba(17, 24, 39, 0.85);
         color: #ffffff;
         padding: 8px 12px;
@@ -104,127 +33,12 @@
         font-family: "Segoe UI", Arial, sans-serif;
         font-size: 12px;
         z-index: 1000;
-        display: flex;
-        gap: 8px;
-        align-items: center;
       }
-
-      #clearPopup {
-        background: #1f2937;
-        border: 1px solid #374151;
-        color: #ffffff;
-        padding: 2px 8px;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 11px;
-      }
-
-      .map-overlay.debug {
-        top: 48px;
-        background: rgba(148, 163, 184, 0.5);
-        color: #0f172a;
-      }
-
-      .map-overlay.legend {
-        top: auto;
-        bottom: 12px;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 6px;
-        background: rgba(148, 163, 184, 0.5);
-        color: #0f172a;
-      }
-
-      .legend-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 11px;
-      }
-
-      .legend-swatch {
-        width: 12px;
-        height: 12px;
-        border-radius: 3px;
-        border: 1px solid rgba(15, 23, 42, 0.4);
-      }
-
-      .hidden {
-        display: none;
-      }
-
-      .llbg-label {
-        background: rgba(255, 255, 255, 0.9);
-        color: #4c1d95;
-        border: 1px solid #c4b5fd;
-        border-radius: 4px;
-        padding: 1px 4px;
-        font-size: 10px;
-      }
-
-      .leaflet-tooltip.gse-label {
-        border-radius: 6px;
-        color: #ffffff !important;
-        font-weight: 700;
-        font-size: 12px;
-        padding: 2px 6px;
-        border: 1px solid rgba(0, 0, 0, 0.25) !important;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-      }
-      .leaflet-tooltip.gse-status-available,
-      .legend-swatch.gse-status-available { background: #00a651 !important; }
-      .leaflet-tooltip.gse-status-in-use,
-      .legend-swatch.gse-status-in-use { background: #f97316 !important; }
-      .leaflet-tooltip.gse-status-moving,
-      .legend-swatch.gse-status-moving { background: #1e88e5 !important; }
-      .leaflet-tooltip.gse-status-idle,
-      .legend-swatch.gse-status-idle { background: #e91e63 !important; }
-      .leaflet-tooltip.gse-status-ignition,
-      .legend-swatch.gse-status-ignition { background: #fdd835 !important; color: #111827 !important; }
-      .leaflet-tooltip.gse-status-working,
-      .legend-swatch.gse-status-working { background: #e53935 !important; }
-      .leaflet-tooltip.gse-status-maintenance,
-      .legend-swatch.gse-status-maintenance { background: #fb8c00 !important; }
-      .leaflet-tooltip.gse-status-low-battery,
-      .legend-swatch.gse-status-low-battery { background: #fbc02d !important; color: #111827 !important; }
-      .leaflet-tooltip.gse-status-alert,
-      .legend-swatch.gse-status-alert { background: #ef6c00 !important; }
     </style>
   </head>
   <body>
-    <div class="view-tabs">
-      <button class="view-tab active" data-view="map">Map</button>
-      <button class="view-tab" data-view="table">Table</button>
-    </div>
-    <div id="mapView" class="view-panel active">
-      <div id="map"></div>
-      <div class="map-overlay">
-        <span id="mapStatus">Loading...</span>
-        <button id="clearPopup" type="button">Clear</button>
-      </div>
-      <div id="debugOverlay" class="map-overlay debug hidden">
-        <span id="mapDebug">debug</span>
-      </div>
-      <div id="legendOverlay" class="map-overlay legend hidden">
-        <div class="legend-row"><span class="legend-swatch gse-status-available"></span>Available</div>
-        <div class="legend-row"><span class="legend-swatch gse-status-in-use"></span>In use</div>
-        <div class="legend-row"><span class="legend-swatch gse-status-moving"></span>Moving</div>
-        <div class="legend-row"><span class="legend-swatch gse-status-idle"></span>Idle</div>
-        <div class="legend-row"><span class="legend-swatch gse-status-ignition"></span>Ignition on</div>
-        <div class="legend-row"><span class="legend-swatch gse-status-working"></span>Working</div>
-        <div class="legend-row"><span class="legend-swatch gse-status-maintenance"></span>Maintenance</div>
-        <div class="legend-row"><span class="legend-swatch gse-status-low-battery"></span>Low battery</div>
-        <div class="legend-row"><span class="legend-swatch gse-status-alert"></span>Alert</div>
-      </div>
-    </div>
-    <div id="tableView" class="view-panel table-view">
-      <div class="table-container">
-        <table class="gse-table">
-          <thead id="gseTableHead"></thead>
-          <tbody id="gseTableBody"></tbody>
-        </table>
-      </div>
-    </div>
+    <div id="map"></div>
+    <div class="map-overlay" id="mapStatus">Loading...</div>
 
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -236,11 +50,191 @@
       const POLL_INTERVAL_MS = 2000;
       const map = L.map("map").setView([32.004, 34.876], 13);
       const layer = L.layerGroup().addTo(map);
-      const llbgLayer = L.layerGroup();
-      const debugLayer = L.layerGroup();
-      const legendLayer = L.layerGroup();
-      const chartLayers = {};
-      // ... rest of your file unchanged ...
+
+      const osmStreets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(map);
+      const osmStandard = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
+      });
+      const esriSat = L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        {
+          maxZoom: 19,
+          attribution: "Tiles &copy; Esri",
+        }
+      );
+      L.control
+        .layers(
+          {
+            "OSM streets": osmStreets,
+            OSM: osmStandard,
+            "Satellite (Esri)": esriSat,
+          },
+          {},
+          { position: "topright" }
+        )
+        .addTo(map);
+
+      const markers = {};
+      let fitted = false;
+      const iconCache = new Map();
+
+      function iconPathForRow(row) {
+        const label = String(row.label || "").toLowerCase();
+        const group = String(row.group_name || "").toLowerCase();
+        const name = `${label} ${group}`;
+        if (label.includes("5032")) {
+          return "Pictures/towing_barless_transparent.png";
+        }
+        if (label.includes("6074")) {
+          return "Pictures/Champ70_transparent.png";
+        }
+        if (name.includes("towing") || name.includes("tow") || name.includes("?Æ?ò?¿?¿?Ö?¥")) {
+          return "Pictures/TowBar.png";
+        }
+        if (name.includes("loader") || name.includes("???ÿ?ó?á?Ö?¥")) {
+          return "Pictures/Loader.png";
+        }
+        if (name.includes("acu") || name.includes("a/c")) {
+          return "Pictures/TLD ACU.png";
+        }
+        if (name.includes("gpu")) {
+          return "Pictures/TLD GPU.png";
+        }
+        if (name.includes("stair") || name.includes("stairs")) {
+          return "Pictures/staires.png";
+        }
+        if (name.includes("manito")) {
+          return "Pictures/Manito.png";
+        }
+        if (name.includes("tractor") || name.includes("tracktor") || name.includes("trac")) {
+          return "Pictures/Tracktor.png";
+        }
+        return "Pictures/Aviation1.jpg";
+      }
+
+      function markerSizeForZoom(zoom) {
+        const size = 14 + (zoom - 10) * 3;
+        return Math.max(20, Math.min(56, Math.round(size)));
+      }
+
+      function markerIcon(path, size) {
+        const key = `${path}|${size}`;
+        if (!iconCache.has(key)) {
+          iconCache.set(
+            key,
+            L.icon({
+              iconUrl: encodeURI(path),
+              iconSize: [size, size],
+              iconAnchor: [size / 2, size / 2],
+              popupAnchor: [0, -size / 2],
+            })
+          );
+        }
+        return iconCache.get(key);
+      }
+
+      function updateMarkerIcons() {
+        const size = markerSizeForZoom(map.getZoom());
+        Object.values(markers).forEach((marker) => {
+          const iconPath = marker.options.iconPath || "Pictures/Aviation1.jpg";
+          marker.setIcon(markerIcon(iconPath, size));
+        });
+      }
+
+      map.on("zoomend", updateMarkerIcons);
+
+      function statusLabel(row) {
+        return row.movement_status || row.connection_status || "unknown";
+      }
+
+      function popupHtml(row) {
+        const label = row.label || row.tracker_id || "tracker";
+        const lat = row.lat;
+        const lng = row.lng;
+        const status = statusLabel(row);
+        const base = `<strong>${label}</strong><br/>${status}<br/>${lat}, ${lng}`;
+        const extra = [];
+        if (label.includes("6074")) {
+          extra.push(`Engine_Temp: ${row.Engine_Temp ?? "--"}`);
+          extra.push(`Engine_O.P: ${row["Engine_O.P"] ?? "--"}`);
+          extra.push(`Fuel: ${row.Fuel ?? "--"}`);
+          extra.push(`Engine Hours: ${row.engine_hours ?? "--"}`);
+          extra.push(`Odometer: ${row.odometer ?? "--"}`);
+        }
+        if (label.includes("5032")) {
+          extra.push(`Fuel_level: ${row.Fuel_level ?? "--"}`);
+          extra.push(`Engine RPM: ${row.engine_rpm ?? "--"}`);
+          extra.push(`Engine Hours: ${row.engine_hours_total ?? row.engine_hours ?? "--"}`);
+          extra.push(`Next Service: ${row.next_service_hours ?? "--"}`);
+          extra.push(`Odometer: ${row.odometer ?? "--"}`);
+        }
+        return `${base}${extra.length ? "<br/>" + extra.join("<br/>") : ""}`;
+      }
+
+      function updateMarkers(rows) {
+        layer.clearLayers();
+        const bounds = [];
+        Object.keys(markers).forEach((key) => delete markers[key]);
+        rows.forEach((row) => {
+          const lat = Number(row.lat);
+          const lng = Number(row.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return;
+          }
+          const status = row.connection_status || "unknown";
+          const label = row.label || row.tracker_id || "tracker";
+          const iconPath = iconPathForRow(row);
+          const size = markerSizeForZoom(map.getZoom());
+          const marker = L.marker([lat, lng], {
+            icon: markerIcon(iconPath, size),
+            iconPath,
+          })
+            .bindPopup(popupHtml(row))
+            .bindTooltip(label, { permanent: true, direction: "top", offset: [0, -12] });
+          markers[label] = marker;
+          marker.addTo(layer);
+          if (!String(label).toLowerCase().includes("skoda")) {
+            bounds.push([lat, lng]);
+          }
+        });
+
+        const statusEl = document.getElementById("mapStatus");
+        if (statusEl) {
+          statusEl.textContent = `Trackers: ${rows.length} | Markers: ${bounds.length}`;
+        }
+
+        if (!fitted) {
+          if (bounds.length === 1) {
+            map.setView(bounds[0], 15);
+          } else {
+            map.fitBounds(bounds, { padding: [20, 20] });
+          }
+          fitted = true;
+        }
+      }
+
+      async function loadData() {
+        try {
+          const response = await fetch(LIVE_API_URL);
+          if (!response.ok) {
+            throw new Error("fetch failed");
+          }
+          const payload = await response.json();
+          updateMarkers(payload.rows || []);
+        } catch (error) {
+          const statusEl = document.getElementById("mapStatus");
+          if (statusEl) {
+            statusEl.textContent = "Failed to load live data.";
+          }
+        }
+      }
+
+      loadData();
+      setInterval(loadData, POLL_INTERVAL_MS);
     </script>
   </body>
 </html>
