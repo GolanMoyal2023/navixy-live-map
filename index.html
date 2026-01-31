@@ -86,6 +86,12 @@
         vertical-align: top;
       }
 
+      table.gse-table td.gse-table-key {
+        font-weight: 700;
+        color: #e2e8f0;
+        white-space: nowrap;
+      }
+
       table.gse-table th {
         position: sticky;
         top: 0;
@@ -389,6 +395,36 @@
       let activePopupId = null;
       let isRefreshing = false;
       let lastRows = [];
+      const TABLE_COLUMNS = [
+        { key: "gse", label: "GSE", value: (row) => formatLabel(row) },
+        { key: "movement_status", label: "movement_status", value: (row) => formatFieldValue("movement_status", row.movement_status) },
+        {
+          key: "lat_lng",
+          label: "lat / lng",
+          value: (row) => (row.lat !== undefined && row.lng !== undefined ? `${row.lat} ; ${row.lng}` : "--"),
+        },
+        { key: "connection_status", label: "connection_status", value: (row) => formatFieldValue("connection_status", row.connection_status) },
+        { key: "battery_level", label: "battery_level", value: (row) => row.battery_level ?? "--" },
+        { key: "gsm_signal", label: "gsm_signal", value: (row) => row.gsm_signal ?? "--" },
+        { key: "gps_signal", label: "gps_signal", value: (row) => row.gps_signal ?? "--" },
+        { key: "engine_hours", label: "engine_hours", value: (row) => formatFieldValue("engine_hours", row.engine_hours) },
+        { key: "next_service_hours", label: "next_service_hours", value: (row) => row.next_service_hours ?? "--" },
+        { key: "Board voltage", label: "Board voltage", value: (row) => row["Board voltage"] ?? "--" },
+        { key: "Fuel_level", label: "Fuel_level", value: (row) => row.Fuel_level ?? "--" },
+        { key: "brake_pressure_actual", label: "brake_pressure_actual", value: (row) => row.brake_pressure_actual ?? "--" },
+        { key: "engine_rpm", label: "engine_rpm", value: (row) => row.engine_rpm ?? "--" },
+        { key: "gotis_status", label: "gotis_status", value: (row) => formatFieldValue("gotis_status", row.gotis_status) },
+        { key: "pickup_state", label: "pickup_state", value: (row) => formatFieldValue("pickup_state", row.pickup_state) },
+        { key: "Gottis", label: "Gottis", value: (row) => row.Gottis ?? "--" },
+        { key: "Moving", label: "Moving", value: (row) => row.Moving ?? "--" },
+        { key: "Pup_State", label: "Pup_State", value: (row) => row.Pup_State ?? "--" },
+        { key: "Towing Detection", label: "Towing Detection", value: (row) => row["Towing Detection"] ?? "--" },
+        { key: "Ignition", label: "Ignition", value: (row) => row.Ignition ?? row.ignition ?? "--" },
+        { key: "beacon_name", label: "Beacon name", value: (row) => row.EyeBecon ?? "--" },
+        { key: "beacon_id", label: "Beacon ID", value: (row) => row["BLE: ID"] ?? "--" },
+        { key: "beacon_key", label: "Beacon key", value: (row) => row["Hardware key"] ?? "--" },
+        { key: "last_update", label: "Last update", value: (row) => row.last_update || row.gps_updated || "--" },
+      ];
       const STAR_SECTIONS = [
         {
           title: "Status / Position",
@@ -875,23 +911,16 @@
         if (!head || !body) {
           return;
         }
-        head.innerHTML = `<tr><th>Field</th><th>Value</th></tr>`;
+        head.innerHTML = `<tr>${TABLE_COLUMNS.map((col) => `<th>${col.label}</th>`).join("")}</tr>`;
         body.innerHTML = rows
           .map((row) => {
-            const sections = STAR_SECTIONS.map((section) => {
-              const sectionTs = sectionTimestamp(row, section);
-              const headerTs = sectionTs ? `<span class="gse-ts">${sectionTs}</span>` : "";
-              const sectionHeader = `<tr class="section-row"><th colspan="2">${section.title}${headerTs}</th></tr>`;
-              const rowsHtml = section.fields
-                .map((field) => {
-                  const raw = pickValue(row, field.keys);
-                  const value = formatFieldValue(field.label, raw);
-                  return `<tr><td class="gse-field-label">${field.label}</td><td>${formatValue(value)}</td></tr>`;
-                })
-                .join("");
-              return `${sectionHeader}${rowsHtml}`;
+            const cells = TABLE_COLUMNS.map((col) => {
+              const value = col.value(row);
+              const safeValue = value !== null && value !== undefined && value !== "" ? value : "--";
+              const cls = col.key === "gse" ? " class=\"gse-table-key\"" : "";
+              return `<td${cls}>${safeValue}</td>`;
             }).join("");
-            return sections;
+            return `<tr>${cells}</tr>`;
           })
           .join("");
       }
