@@ -93,6 +93,115 @@
         z-index: 1;
       }
 
+      table.gse-table tr.section-row th {
+        background: #0b1220;
+        font-weight: 700;
+        text-align: left;
+        font-size: 12px;
+      }
+
+      .gse-field-label {
+        font-weight: 600;
+        color: inherit;
+      }
+
+      .gse-ts {
+        font-size: 70%;
+        color: #cbd5f5;
+        margin-left: 6px;
+      }
+
+      @media (max-width: 480px) {
+        .gse-ts {
+          display: block;
+          margin-left: 0;
+        }
+      }
+
+      .gse-popup {
+        font-family: "Segoe UI", Arial, sans-serif;
+        font-size: 11px;
+        line-height: 1.25;
+        max-width: 260px;
+        max-height: 65vh;
+        overflow: auto;
+        color: #0f172a;
+      }
+
+      .gse-popup h4 {
+        margin: 0 0 6px;
+        font-size: 12px;
+      }
+
+      .gse-section {
+        margin: 10px 0 6px;
+        font-weight: 700;
+        color: #0b4a6f;
+        border-bottom: 1px solid #e2e8f0;
+        padding-bottom: 2px;
+      }
+
+      .gse-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 3px 0 4px;
+        padding: 4px 6px;
+        border-radius: 6px;
+      }
+
+      .gse-label {
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .gse-value {
+        text-align: right;
+        overflow-wrap: anywhere;
+      }
+
+      .gse-style-soft .gse-row {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+      }
+
+      .gse-style-soft .gse-label {
+        color: #1e3a8a;
+      }
+
+      .gse-style-soft .gse-value {
+        color: #0f172a;
+      }
+
+      .gse-style-outline .gse-row {
+        background: #ffffff;
+        border: 1px solid #cbd5f5;
+      }
+
+      .gse-style-outline .gse-label {
+        color: #0f766e;
+      }
+
+      .gse-style-outline .gse-value {
+        color: #0f172a;
+      }
+
+      .gse-style-compact .gse-row {
+        background: transparent;
+        border: none;
+        border-bottom: 1px dashed #e2e8f0;
+        border-radius: 0;
+        padding: 3px 0;
+      }
+
+      .gse-style-compact .gse-label {
+        color: #334155;
+      }
+
+      .gse-style-compact .gse-value {
+        color: #0f172a;
+      }
+
       .map-overlay {
         position: absolute;
         top: 12px;
@@ -232,7 +341,8 @@
       crossorigin=""
     ></script>
     <script>
-      const LIVE_API_URL = "https://outside-notebook-sheer-discounted.trycloudflare.com/data";
+      const LIVE_API_URL = "https://fcc-advocate-purchased-clicking.trycloudflare.com/data";
+      const POPUP_STYLE = "outline"; // soft | outline | compact
       const POLL_INTERVAL_MS = 2000;
       const map = L.map("map").setView([32.004, 34.876], 13);
       const layer = L.layerGroup().addTo(map);
@@ -279,27 +389,66 @@
       let activePopupId = null;
       let isRefreshing = false;
       let lastRows = [];
-      const STAR_FIELDS = [
-        { label: "movement_status", keys: ["movement_status"], updatedKey: "movement_status__updated" },
-        { label: "last_update", keys: ["last_update"] },
-        { label: "lat / lng", keys: ["lat_lng"], updatedKey: "lat_lng__updated" },
-        { label: "connection_status", keys: ["connection_status"], updatedKey: "connection_status__updated" },
-        { label: "battery_level", keys: ["battery_level"], updatedKey: "battery_level__updated" },
-        { label: "gsm_signal", keys: ["gsm_signal"], updatedKey: "gsm_signal__updated" },
-        { label: "gps_signal", keys: ["gps_signal"], updatedKey: "gps_signal__updated" },
-        { label: "engine_hours", keys: ["engine_hours", "engine_hours_total"], updatedKey: "engine_hours__updated" },
-        { label: "next_service_hours", keys: ["next_service_hours"], updatedKey: "next_service_hours__updated" },
-        { label: "Board voltage", keys: ["Board voltage", "board_voltage"], updatedKey: "Board voltage__updated" },
-        { label: "Fuel_level", keys: ["Fuel_level", "Fuel level"], updatedKey: "Fuel_level__updated" },
-        { label: "brake_pressure_actual", keys: ["brake_pressure_actual"], updatedKey: "brake_pressure_actual__updated" },
-        { label: "engine_rpm", keys: ["engine_rpm"], updatedKey: "engine_rpm__updated" },
-        { label: "gotis_status", keys: ["gotis_status"], updatedKey: "gotis_status__updated" },
-        { label: "pickup_state", keys: ["pickup_state"], updatedKey: "pickup_state__updated" },
-        { label: "Gottis", keys: ["Gottis"], updatedKey: "Gottis__updated" },
-        { label: "Moving", keys: ["Moving"], updatedKey: "Moving__updated" },
-        { label: "Pup_State", keys: ["Pup_State"], updatedKey: "Pup_State__updated" },
-        { label: "Towing Detection", keys: ["Towing Detection", "Towing_Detection"], updatedKey: "Towing Detection__updated" },
-        { label: "Ignition", keys: ["Ignition", "ignition"], updatedKey: "Ignition__updated" },
+      const STAR_SECTIONS = [
+        {
+          title: "Status / Position",
+          timestampField: "movement_status",
+          fields: [
+            { label: "movement_status", keys: ["movement_status"], updatedKey: "movement_status__updated" },
+            { label: "lat / lng", keys: ["lat_lng"], updatedKey: "lat_lng__updated" },
+          ],
+        },
+        {
+          title: "GPS device / signals",
+          timestampField: "battery_level",
+          fields: [
+            { label: "connection_status", keys: ["connection_status"], updatedKey: "connection_status__updated" },
+            { label: "battery_level", keys: ["battery_level"], updatedKey: "battery_level__updated" },
+            { label: "gsm_signal", keys: ["gsm_signal"], updatedKey: "gsm_signal__updated" },
+            { label: "gps_signal", keys: ["gps_signal"], updatedKey: "gps_signal__updated" },
+          ],
+        },
+        {
+          title: "Engine hours",
+          timestampField: "engine_hours",
+          fields: [
+            { label: "engine_hours", keys: ["engine_hours"], updatedKey: "engine_hours__updated" },
+            { label: "next_service_hours", keys: ["next_service_hours"], updatedKey: "next_service_hours__updated" },
+          ],
+        },
+        {
+          title: "Sensor last read",
+          timestampField: "Board voltage",
+          fields: [
+            { label: "Board voltage", keys: ["Board voltage", "board_voltage"], updatedKey: "Board voltage__updated" },
+            { label: "Fuel_level", keys: ["Fuel_level", "Fuel level"], updatedKey: "Fuel_level__updated" },
+            { label: "brake_pressure_actual", keys: ["brake_pressure_actual"], updatedKey: "brake_pressure_actual__updated" },
+            { label: "engine_rpm", keys: ["engine_rpm"], updatedKey: "engine_rpm__updated" },
+          ],
+        },
+        {
+          title: "Gotis System",
+          timestampField: "gotis_status",
+          fields: [
+            { label: "gotis_status", keys: ["gotis_status"], updatedKey: "gotis_status__updated" },
+            { label: "pickup_state", keys: ["pickup_state"], updatedKey: "pickup_state__updated" },
+            { label: "Gottis", keys: ["Gottis"], updatedKey: "Gottis__updated" },
+            { label: "Moving", keys: ["Moving"], updatedKey: "Moving__updated" },
+          ],
+        },
+        {
+          title: "Pup System",
+          timestampField: "Pup_State",
+          fields: [
+            { label: "Pup_State", keys: ["Pup_State"], updatedKey: "Pup_State__updated" },
+            { label: "Towing Detection", keys: ["Towing Detection", "Towing_Detection"], updatedKey: "Towing Detection__updated" },
+          ],
+        },
+        {
+          title: "Inputs",
+          timestampField: "Ignition",
+          fields: [{ label: "Ignition", keys: ["Ignition", "ignition"], updatedKey: "Ignition__updated" }],
+        },
       ];
       const iconCache = new Map();
       const lastPositions = new Map();
@@ -661,11 +810,63 @@
         return null;
       }
 
-      function formatValueWithUpdated(value, updated) {
+      function formatNumberWithUnits(value, decimals = 2) {
+        if (value === null || value === undefined || value === "") {
+          return value;
+        }
+        const text = String(value);
+        const match = text.match(/-?\d+(?:\.\d+)?/);
+        if (!match) {
+          return value;
+        }
+        const num = Number(match[0]);
+        if (!Number.isFinite(num)) {
+          return value;
+        }
+        const units = text.replace(match[0], "").trim();
+        const formatted = num.toFixed(decimals);
+        return units ? `${formatted} ${units}` : formatted;
+      }
+
+      function formatFieldValue(label, value) {
         if (value === null || value === undefined || value === "") {
           return "--";
         }
-        return updated ? `${value} (Updated: ${updated})` : `${value}`;
+        let text = String(value);
+        if (text.endsWith(" custom")) {
+          text = text.replace(" custom", "");
+        }
+        if (label === "movement_status") {
+          if (text.toLowerCase() === "parked") {
+            return "Standstill";
+          }
+        }
+        if (label === "connection_status") {
+          if (text.toLowerCase() === "active") {
+            return "Online";
+          }
+        }
+        if (label === "engine_hours") {
+          return formatNumberWithUnits(text, 2);
+        }
+        return value;
+      }
+
+      function formatValue(value) {
+        if (value === null || value === undefined || value === "") {
+          return "--";
+        }
+        return `${value}`;
+      }
+
+      function sectionTimestamp(row, section) {
+        if (section.timestampField) {
+          const match = section.fields.find((field) => field.label === section.timestampField);
+          if (match) {
+            return match.updatedKey ? row[match.updatedKey] : null;
+          }
+        }
+        return null;
       }
 
       function renderTable(rows) {
@@ -674,30 +875,44 @@
         if (!head || !body) {
           return;
         }
-        const headers = STAR_FIELDS.map((f) => f.label);
-        head.innerHTML = `<tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr>`;
+        head.innerHTML = `<tr><th>Field</th><th>Value</th></tr>`;
         body.innerHTML = rows
           .map((row) => {
-            const cells = STAR_FIELDS.map((field) => {
-              const value = pickValue(row, field.keys);
-              const updated = field.updatedKey ? row[field.updatedKey] : null;
-              return formatValueWithUpdated(value, updated);
-            })
-              .map((value) => `<td>${value}</td>`)
-              .join("");
-            return `<tr>${cells}</tr>`;
+            const sections = STAR_SECTIONS.map((section) => {
+              const sectionTs = sectionTimestamp(row, section);
+              const headerTs = sectionTs ? `<span class="gse-ts">${sectionTs}</span>` : "";
+              const sectionHeader = `<tr class="section-row"><th colspan="2">${section.title}${headerTs}</th></tr>`;
+              const rowsHtml = section.fields
+                .map((field) => {
+                  const raw = pickValue(row, field.keys);
+                  const value = formatFieldValue(field.label, raw);
+                  return `<tr><td class="gse-field-label">${field.label}</td><td>${formatValue(value)}</td></tr>`;
+                })
+                .join("");
+              return `${sectionHeader}${rowsHtml}`;
+            }).join("");
+            return sections;
           })
           .join("");
       }
 
       function popupHtml(row) {
         const label = row.label || row.tracker_id || "tracker";
-        const lines = STAR_FIELDS.map((field) => {
-          const value = pickValue(row, field.keys);
-          const updated = field.updatedKey ? row[field.updatedKey] : null;
-          return `${field.label}: ${formatValueWithUpdated(value, updated)}`;
-        });
-        return `<strong>${label}</strong><br/>${lines.join("<br/>")}`;
+        const sections = STAR_SECTIONS.map((section) => {
+          const sectionTs = sectionTimestamp(row, section);
+          const headerTs = sectionTs ? `<span class="gse-ts">${sectionTs}</span>` : "";
+          const items = section.fields
+            .map((field) => {
+              const raw = pickValue(row, field.keys);
+              const value = formatFieldValue(field.label, raw);
+              return `<div class="gse-row"><span class="gse-label">${field.label}</span><span class="gse-value">${formatValue(
+                value
+              )}</span></div>`;
+            })
+            .join("");
+          return `<div class="gse-section">${section.title}${headerTs}</div>${items}`;
+        }).join("");
+        return `<div class="gse-popup gse-style-${POPUP_STYLE}"><h4>${label}</h4>${sections}</div>`;
       }
 
       function updateMarkers(rows) {
@@ -749,7 +964,24 @@
             marker.setLatLng([lat, lng]);
             marker.setIcon(markerIcon(iconPath, size));
             marker.options.iconPath = iconPath;
+            let popupScrollTop = null;
+            if (activePopupId === id) {
+              const popupEl = marker.getPopup()?.getElement();
+              const contentEl = popupEl?.querySelector(".gse-popup");
+              if (contentEl) {
+                popupScrollTop = contentEl.scrollTop;
+              }
+            }
             marker.setPopupContent(popupHtml(row));
+            if (popupScrollTop !== null) {
+              setTimeout(() => {
+                const popupEl = marker.getPopup()?.getElement();
+                const contentEl = popupEl?.querySelector(".gse-popup");
+                if (contentEl) {
+                  contentEl.scrollTop = popupScrollTop;
+                }
+              }, 0);
+            }
             updateTooltip(marker, shortLabel, labelClass);
           }
           seen.add(id);

@@ -60,6 +60,47 @@ def _format_sensor_value(value: Any, units: Any) -> Any:
     return value
 
 
+def _format_number(value: Any, *, force_decimals: bool = False) -> Any:
+    raw = value
+    if isinstance(value, str):
+        try:
+            value = float(value)
+        except ValueError:
+            return raw
+    if not isinstance(value, (int, float)):
+        return raw
+    if force_decimals:
+        return f"{value:.2f}"
+    if abs(value - int(value)) < 1e-9:
+        return str(int(value))
+    return f"{value:.2f}"
+
+
+def _strip_custom_suffix(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    return value.replace(" custom", "")
+
+
+def _normalize_units(units: Any, units_type: Any) -> Any:
+    if units:
+        return units
+    if not units_type:
+        return None
+    units_type_text = str(units_type).lower()
+    if units_type_text == "custom":
+        return None
+    unit_map = {
+        "volt": "V",
+        "percent": "%",
+        "hour": "h",
+        "hours": "h",
+        "kilometer": "km",
+        "kilometre": "km",
+    }
+    return unit_map.get(units_type_text, units_type)
+
+
 def _extract_sensors(state: Dict[str, Any]) -> Dict[str, Any]:
     sensors: Dict[str, Any] = {}
     if not isinstance(state, dict):
@@ -76,7 +117,51 @@ def _extract_sensors(state: Dict[str, Any]) -> Dict[str, Any]:
     return sensors
 
 
-def _build_row(tracker: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_readings(readings: Dict[str, Any]) -> Dict[str, Any]:
+    data: Dict[str, Any] = {}
+    if not isinstance(readings, dict):
+        return data
+    for item in readings.get("inputs", []) or []:
+        if not isinstance(item, dict):
+            continue
+        label = item.get("label") or item.get("name")
+        if not label:
+            continue
+        units = _normalize_units(item.get("units"), item.get("units_type"))
+        raw_value = item.get("value")
+        force_decimals = label in {"engine_hours_total"}
+        value = _format_sensor_value(_format_number(raw_value, force_decimals=force_decimals), units)
+        value = _strip_custom_suffix(value)
+        data[label] = value
+        data[f"{label}__updated"] = _format_timestamp(item.get("update_time"))
+    for item in readings.get("virtual_sensors", []) or []:
+        if not isinstance(item, dict):
+            continue
+        label = item.get("label") or item.get("name")
+        if not label:
+            continue
+        data[label] = _strip_custom_suffix(item.get("value"))
+        data[f"{label}__updated"] = _format_timestamp(item.get("update_time"))
+    for item in readings.get("counters", []) or []:
+        if not isinstance(item, dict):
+            continue
+        counter_type = item.get("type")
+        if not counter_type:
+            continue
+        raw_value = item.get("value")
+        if counter_type == "engine_hours":
+            value = _format_sensor_value(_format_number(raw_value, force_decimals=True), "h")
+        elif counter_type == "odometer":
+            value = _format_sensor_value(_format_number(raw_value), "km")
+        else:
+            value = _format_number(raw_value)
+        value = _strip_custom_suffix(value)
+        data[counter_type] = value
+        data[f"{counter_type}__updated"] = _format_timestamp(item.get("update_time"))
+    return data
+
+
+def _build_row(tracker: Dict[str, Any], state: Dict[str, Any], readings: Dict[str, Any]) -> Dict[str, Any]:
     gps = state.get("gps", {}) if isinstance(state, dict) else {}
     lat = _safe_get(state, "gps", "location", "lat")
     lng = _safe_get(state, "gps", "location", "lng")
@@ -92,8 +177,15 @@ def _build_row(tracker: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]
     gps_updated = _format_timestamp(gps.get("updated"))
     gsm_updated = _format_timestamp(_safe_get(state, "gsm", "updated") or _safe_get(state, "gsm", "last_update"))
     battery_updated = _format_timestamp(
-        _safe_get(state, "battery", "updated") or _safe_get(state, "battery", "last_update") or last_update_raw
+        _safe_get(state, "battery_update")
+        or _safe_get(state, "battery", "updated")
+        or _safe_get(state, "battery", "last_update")
+        or last_update_raw
     )
+    movement_updated = _format_timestamp(
+        _safe_get(state, "movement_status_update") or _safe_get(state, "movement_status_updated") or last_update_raw
+    )
+    ignition_updated = _format_timestamp(_safe_get(state, "ignition_update") or last_update_raw)
     lat_lng = f"{lat} ; {lng}" if lat is not None and lng is not None else None
 
     row = {
@@ -113,6 +205,7 @@ def _build_row(tracker: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]
         "engine_hours": state.get("engine_hours"),
         "odometer": state.get("odometer"),
         "ignition": state.get("ignition"),
+        "Ignition": state.get("ignition"),
         "battery_level": state.get("battery_level"),
         "gps_signal": gps_signal,
         "gsm_signal": gsm_signal,
@@ -121,9 +214,10 @@ def _build_row(tracker: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]
         "sensors_count": state.get("sensors_count"),
         **sensors,
     }
+    row.update(_extract_readings(readings))
     row.update(
         {
-            "movement_status__updated": last_update,
+            "movement_status__updated": movement_updated,
             "connection_status__updated": last_update,
             "battery_level__updated": battery_updated,
             "gsm_signal__updated": gsm_updated,
@@ -131,6 +225,7 @@ def _build_row(tracker: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]
             "engine_hours__updated": row.get("engine_hours__updated") or last_update,
             "next_service_hours__updated": row.get("next_service_hours__updated") or last_update,
             "lat_lng__updated": gps_updated,
+            "Ignition__updated": ignition_updated,
         }
     )
     return row
@@ -160,7 +255,9 @@ def data() -> Any:
         state_resp = _api_call("tracker/get_state", {"tracker_id": tracker_id})
         if not state_resp.get("success"):
             continue
-        row = _build_row(tracker, state_resp.get("state", {}))
+        readings_resp = _api_call("tracker/readings/list", {"tracker_id": tracker_id})
+        readings = readings_resp if readings_resp.get("success") else {}
+        row = _build_row(tracker, state_resp.get("state", {}), readings)
         rows.append(row)
         time.sleep(0.05)
 
