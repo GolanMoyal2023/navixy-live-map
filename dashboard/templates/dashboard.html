@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Navixy System Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 Navixy System Dashboard</h1>
+            <div class="header-controls">
+                <button id="refreshBtn" class="btn btn-primary">🔄 Refresh</button>
+                <span id="lastUpdate" class="last-update">Last update: --</span>
+            </div>
+        </header>
+
+        <div class="system-status">
+            <div class="status-overview">
+                <div class="health-indicator" id="overallHealth">
+                    <span class="health-icon">⏳</span>
+                    <span class="health-text">Checking...</span>
+                </div>
+                <div class="quick-links">
+                    <a href="https://golanmoyal2023.github.io/navixy-live-map/" target="_blank" class="quick-link-btn">
+                        🗺️ Live Map
+                    </a>
+                    <a id="liveDataLink" href="#" target="_blank" class="quick-link-btn">
+                        📊 Live Data
+                    </a>
+                    <button id="systemResetBtn" class="quick-link-btn reset-btn" onclick="systemReset()">
+                        🔄 System Reset
+                    </button>
+                </div>
+                <div class="health-stats">
+                    <span id="healthPercentage">0%</span> Healthy
+                </div>
+            </div>
+        </div>
+
+        <div class="components-grid" id="componentsGrid">
+            <!-- Components will be populated by JavaScript -->
+        </div>
+
+        <div class="controls-section">
+            <h2>Service Controls</h2>
+            <div class="controls-grid">
+                <button class="btn btn-control" onclick="restartService('NavixyApi')">
+                    🔄 Restart API Service
+                </button>
+                <button class="btn btn-control" onclick="restartService('NavixyQuickTunnel')">
+                    🔄 Restart Tunnel Service
+                </button>
+                <button class="btn btn-control" onclick="restartService('NavixyDashboard')">
+                    🔄 Restart Dashboard
+                </button>
+            </div>
+        </div>
+
+        <div class="info-section">
+            <h2>System Information</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>Tunnel URL:</label>
+                    <span id="tunnelUrl">--</span>
+                </div>
+                <div class="info-item">
+                    <label>GitHub Pages:</label>
+                    <a href="https://golanmoyal2023.github.io/navixy-live-map/" target="_blank">Open Map</a>
+                </div>
+                <div class="info-item">
+                    <label>API Server:</label>
+                    <span>http://localhost:8765</span>
+                </div>
+                <div class="info-item">
+                    <label>Dashboard:</label>
+                    <span>http://localhost:8766</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+$env:NAVIXY_API_HASH = "f038d4c96bfc683cdc52337824f7e5f0"
+$env:PORT = "8765"

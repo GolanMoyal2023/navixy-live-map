@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Navixy Live Map</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+
+      #map {
+        height: 100%;
+        width: 100%;
+      }
+
+      .view-tabs {
+        position: absolute;
+        top: 72px;
+        right: 12px;
+        z-index: 1000;
+        display: flex;
+        gap: 6px;
+      }
+
+      .view-tab {
+        background: rgba(17, 24, 39, 0.85);
+        color: #ffffff;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      .view-tab.active {
+        background: #2563eb;
+        border-color: #1d4ed8;
+      }
+
+      .view-panel {
+        display: none;
+        height: 100%;
+        width: 100%;
+        position: relative;
+      }
+
+      .view-panel.active {
+        display: block;
+      }
+
+      .table-view {
+        height: 100%;
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+
+      .table-container {
+        max-height: calc(100% - 16px);
+        overflow: auto;
+        border: 1px solid #1f2937;
+        border-radius: 8px;
+      }
+
+      table.gse-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      table.gse-table th,
+      table.gse-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid #1f2937;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      table.gse-table td.gse-table-key {
+        font-weight: 700;
+        color: #e2e8f0;
+        white-space: nowrap;
+      }
+
+      table.gse-table th {
+        position: sticky;
+        top: 0;
+        background: #111827;
+        z-index: 1;
+      }
+
+      table.gse-table tr.section-row th {
+        background: #0b1220;
+        font-weight: 700;
+        text-align: left;
+        font-size: 12px;
+      }
+
+      .gse-field-label {
+        font-weight: 600;
+        color: inherit;
+      }
+
+      .gse-ts {
+        font-size: 70%;
+        color: #cbd5f5;
+        margin-left: 6px;
+      }
+
+      @media (max-width: 480px) {
+        .gse-ts {
+          display: block;
+          margin-left: 0;
+        }
+      }
+
+      .gse-popup {
+        font-family: "Segoe UI", Arial, sans-serif;
+        font-size: 11px;
+        line-height: 1.25;
+        max-width: 260px;
+        max-height: 65vh;
+        overflow: auto;
+        color: #0f172a;
+      }
+
+      .gse-popup h4 {
+        margin: 0 0 6px;
+        font-size: 12px;
+      }
+
+      .gse-section {
+        margin: 10px 0 6px;
+        font-weight: 700;
+        color: #0b4a6f;
+        border-bottom: 1px solid #e2e8f0;
+        padding-bottom: 2px;
+      }
+
+      .gse-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 3px 0 4px;
+        padding: 4px 6px;
+        border-radius: 6px;
+      }
+
+      .gse-label {
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .gse-value {
+        text-align: right;
+        overflow-wrap: anywhere;
+      }
+
+      .gse-style-soft .gse-row {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+      }
+
+      .gse-style-soft .gse-label {
+        color: #1e3a8a;
+      }
+
+      .gse-style-soft .gse-value {
+        color: #0f172a;
+      }
+
+      .gse-style-outline .gse-row {
+        background: #ffffff;
+        border: 1px solid #cbd5f5;
+      }
+
+      .gse-style-outline .gse-label {
+        color: #0f766e;
+      }
+
+      .gse-style-outline .gse-value {
+        color: #0f172a;
+      }
+
+      .gse-style-compact .gse-row {
+        background: transparent;
+        border: none;
+        border-bottom: 1px dashed #e2e8f0;
+        border-radius: 0;
+        padding: 3px 0;
+      }
+
+      .gse-style-compact .gse-label {
+        color: #334155;
+      }
+
+      .gse-style-compact .gse-value {
+        color: #0f172a;
+      }
+
+      .map-overlay {
+        position: absolute;
+        top: 12px;
+        left: 56px;
+        background: rgba(17, 24, 39, 0.85);
+        color: #ffffff;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-family: "Segoe UI", Arial, sans-serif;
+        font-size: 12px;
+        z-index: 1000;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      #clearPopup {
+        background: #1f2937;
+        border: 1px solid #374151;
+        color: #ffffff;
+        padding: 2px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 11px;
+      }
+
+      .map-overlay.debug {
+        top: 48px;
+        background: rgba(148, 163, 184, 0.5);
+        color: #0f172a;
+      }
+
+      .map-overlay.legend {
+        top: auto;
+        bottom: 12px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+        background: rgba(148, 163, 184, 0.5);
+        color: #0f172a;
+      }
+
+      .legend-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+      }
+
+      .legend-swatch {
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+        border: 1px solid rgba(15, 23, 42, 0.4);
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .llbg-label {
+        background: rgba(255, 255, 255, 0.9);
+        color: #4c1d95;
+        border: 1px solid #c4b5fd;
+        border-radius: 4px;
+        padding: 1px 4px;
+        font-size: 10px;
+      }
+
+      .leaflet-tooltip.gse-label {
+        border-radius: 6px;
+        color: #ffffff !important;
+        font-weight: 700;
+        font-size: 12px;
+        padding: 2px 6px;
+        border: 1px solid rgba(0, 0, 0, 0.25) !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+      }
+      .leaflet-tooltip.gse-status-available,
+      .legend-swatch.gse-status-available { background: #00a651 !important; }
+      .leaflet-tooltip.gse-status-in-use,
+      .legend-swatch.gse-status-in-use { background: #f97316 !important; }
+      .leaflet-tooltip.gse-status-moving,
+      .legend-swatch.gse-status-moving { background: #1e88e5 !important; }
+      .leaflet-tooltip.gse-status-idle,
+      .legend-swatch.gse-status-idle { background: #e91e63 !important; }
+      .leaflet-tooltip.gse-status-ignition,
+      .legend-swatch.gse-status-ignition { background: #fdd835 !important; color: #111827 !important; }
+      .leaflet-tooltip.gse-status-working,
+      .legend-swatch.gse-status-working { background: #e53935 !important; }
+      .leaflet-tooltip.gse-status-maintenance,
+      .legend-swatch.gse-status-maintenance { background: #fb8c00 !important; }
+      .leaflet-tooltip.gse-status-low-battery,
+      .legend-swatch.gse-status-low-battery { background: #fbc02d !important; color: #111827 !important; }
+      .leaflet-tooltip.gse-status-alert,
+      .legend-swatch.gse-status-alert { background: #ef6c00 !important; }
+    </style>
+  </head>
+  <body>
+    <div class="view-tabs">
+      <button class="view-tab active" data-view="map">Map</button>
+      <button class="view-tab" data-view="table">Table</button>
+    </div>
+    <div id="mapView" class="view-panel active">
+      <div id="map"></div>
+      <div class="map-overlay">
+        <span id="mapStatus">Loading...</span>
+        <button id="clearPopup" type="button">Clear</button>
+      </div>
+      <div id="debugOverlay" class="map-overlay debug hidden">
+        <span id="mapDebug">debug</span>
+      </div>
+      <div id="legendOverlay" class="map-overlay legend hidden">
+        <div class="legend-row"><span class="legend-swatch gse-status-available"></span>Available</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-in-use"></span>In use</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-moving"></span>Moving</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-idle"></span>Idle</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-ignition"></span>Ignition on</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-working"></span>Working</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-maintenance"></span>Maintenance</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-low-battery"></span>Low battery</div>
+        <div class="legend-row"><span class="legend-swatch gse-status-alert"></span>Alert</div>
+      </div>
+    </div>
+    <div id="tableView" class="view-panel table-view">
+      <div class="table-container">
+        <table class="gse-table">
+          <thead id="gseTableHead"></thead>
+          <tbody id="gseTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      const LIVE_API_URL = "http://localhost:8765/data";
+      const POPUP_STYLE = "outline"; // soft | outline | compact
+      const POLL_INTERVAL_MS = 2000;
+      const map = L.map("map").setView([32.004, 34.876], 13);
+      const layer = L.layerGroup().addTo(map);
+      const llbgLayer = L.layerGroup();
+      const debugLayer = L.layerGroup();
+      const legendLayer = L.layerGroup();
+      const chartLayers = {};
+
+      const osmStreets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(map);
+      const osmStandard = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors",
+      });
+      const esriSat = L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        {
+          maxZoom: 19,
+          attribution: "Tiles &copy; Esri",
+        }
+      );
+      const baseLayers = {
+        "OSM streets": osmStreets,
+        OSM: osmStandard,
+        "Satellite (Esri)": esriSat,
+      };
+      const overlayLayers = {
+        "LLBG Gates/Zones": llbgLayer,
+      };
+      const layersControl = L.control
+        .layers(
+          baseLayers,
+          overlayLayers,
+          { position: "topright" }
+        )
+        .addTo(map);
+      layersControl.addOverlay(debugLayer, "Debug");
+      layersControl.addOverlay(legendLayer, "GSE Legend");
+
+      const markers = {};
+      let fitted = false;
+      let activePopupId = null;
+      let isRefreshing = false;
+      let lastRows = [];
+      const TABLE_COLUMNS = [
+        { key: "gse", label: "GSE", value: (row) => formatLabel(row) },
+        { key: "movement_status", label: "movement_status", value: (row) => formatFieldValue("movement_status", row.movement_status) },
+        {
+          key: "lat_lng",
+          label: "lat / lng",
+          value: (row) => (row.lat !== undefined && row.lng !== undefined ? `${row.lat} ; ${row.lng}` : "--"),
+        },
+        { key: "connection_status", label: "connection_status", value: (row) => formatFieldValue("connection_status", row.connection_status) },
+        { key: "battery_level", label: "battery_level", value: (row) => row.battery_level ?? "--" },
+        { key: "gsm_signal", label: "gsm_signal", value: (row) => row.gsm_signal ?? "--" },
+        { key: "gps_signal", label: "gps_signal", value: (row) => row.gps_signal ?? "--" },
+        { key: "engine_hours", label: "engine_hours", value: (row) => formatFieldValue("engine_hours", row.engine_hours) },
+        { key: "next_service_hours", label: "next_service_hours", value: (row) => row.next_service_hours ?? "--" },
+        { key: "Board voltage", label: "Board voltage", value: (row) => row["Board voltage"] ?? "--" },
+        { key: "Fuel_level", label: "Fuel_level", value: (row) => row.Fuel_level ?? "--" },
+        { key: "brake_pressure_actual", label: "brake_pressure_actual", value: (row) => row.brake_pressure_actual ?? "--" },
+        { key: "engine_rpm", label: "engine_rpm", value: (row) => row.engine_rpm ?? "--" },
+        { key: "gotis_status", label: "gotis_status", value: (row) => formatFieldValue("gotis_status", row.gotis_status) },
+        { key: "pickup_state", label: "pickup_state", value: (row) => formatFieldValue("pickup_state", row.pickup_state) },
+        { key: "Gottis", label: "Gottis", value: (row) => row.Gottis ?? "--" },
+        { key: "Moving", label: "Moving", value: (row) => row.Moving ?? "--" },
+        { key: "Pup_State", label: "Pup_State", value: (row) => row.Pup_State ?? "--" },
+        { key: "Towing Detection", label: "Towing Detection", value: (row) => row["Towing Detection"] ?? "--" },
+        { key: "Ignition", label: "Ignition", value: (row) => row.Ignition ?? row.ignition ?? "--" },
+        { key: "beacon_name", label: "Beacon name", value: (row) => row.EyeBecon ?? "--" },
+        { key: "beacon_id", label: "Beacon ID", value: (row) => row["BLE: ID"] ?? "--" },
+        { key: "beacon_key", label: "Beacon key", value: (row) => row["Hardware key"] ?? "--" },
+        { key: "last_update", label: "Last update", value: (row) => row.last_update || row.gps_updated || "--" },
+      ];
+      const STAR_SECTIONS = [
+        {
+          title: "Status / Position",
+          timestampField: "movement_status",
+          fields: [
+            { label: "movement_status", keys: ["movement_status"], updatedKey: "movement_status__updated" },
+            { label: "lat / lng", keys: ["lat_lng"], updatedKey: "lat_lng__updated" },
+          ],
+        },
+        {
+          title: "GPS device / signals",
+          timestampField: "battery_level",
+          fields: [
+            { label: "connection_status", keys: ["connection_status"], updatedKey: "connection_status__updated" },
+            { label: "battery_level", keys: ["battery_level"], updatedKey: "battery_level__updated" },
+            { label: "gsm_signal", keys: ["gsm_signal"], updatedKey: "gsm_signal__updated" },
+            { label: "gps_signal", keys: ["gps_signal"], updatedKey: "gps_signal__updated" },
+          ],
+        },
+        {
+          title: "Engine hours",
+          timestampField: "engine_hours",
+          fields: [
+            { label: "engine_hours", keys: ["engine_hours"], updatedKey: "engine_hours__updated" },
+            { label: "next_service_hours", keys: ["next_service_hours"], updatedKey: "next_service_hours__updated" },
+          ],
+        },
+        {
+          title: "Sensor last read",
+          timestampField: "Board voltage",
+          fields: [
+            { label: "Board voltage", keys: ["Board voltage", "board_voltage"], updatedKey: "Board voltage__updated" },
+            { label: "Fuel_level", keys: ["Fuel_level", "Fuel level"], updatedKey: "Fuel_level__updated" },
+            { label: "brake_pressure_actual", keys: ["brake_pressure_actual"], updatedKey: "brake_pressure_actual__updated" },
+            { label: "engine_rpm", keys: ["engine_rpm"], updatedKey: "engine_rpm__updated" },
+          ],
+        },
+        {
+          title: "Gotis System",
+          timestampField: "gotis_status",
+          fields: [
+            { label: "gotis_status", keys: ["gotis_status"], updatedKey: "gotis_status__updated" },
+            { label: "pickup_state", keys: ["pickup_state"], updatedKey: "pickup_state__updated" },
+            { label: "Gottis", keys: ["Gottis"], updatedKey: "Gottis__updated" },
+            { label: "Moving", keys: ["Moving"], updatedKey: "Moving__updated" },
+          ],
+        },
+        {
+          title: "Pup System",
+          timestampField: "Pup_State",
+          fields: [
+            { label: "Pup_State", keys: ["Pup_State"], updatedKey: "Pup_State__updated" },
+            { label: "Towing Detection", keys: ["Towing Detection", "Towing_Detection"], updatedKey: "Towing Detection__updated" },
+          ],
+        },
+        {
+          title: "Inputs",
+          timestampField: "Ignition",
+          fields: [{ label: "Ignition", keys: ["Ignition", "ignition"], updatedKey: "Ignition__updated" }],
+        },
+      ];
+      const iconCache = new Map();
+      const lastPositions = new Map();
+      const clearButton = document.getElementById("clearPopup");
+      const debugOverlay = document.getElementById("debugOverlay");
+      const legendOverlay = document.getElementById("legendOverlay");
+
+      if (clearButton) {
+        clearButton.addEventListener("click", () => {
+          Object.values(markers).forEach((marker) => marker.closePopup());
+          activePopupId = null;
+        });
+      }
+
+      const viewTabs = document.querySelectorAll(".view-tab");
+      const mapView = document.getElementById("mapView");
+      const tableView = document.getElementById("tableView");
+      viewTabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+          viewTabs.forEach((t) => t.classList.remove("active"));
+          tab.classList.add("active");
+          const view = tab.dataset.view;
+          if (view === "table") {
+            mapView.classList.remove("active");
+            tableView.classList.add("active");
+          } else {
+            tableView.classList.remove("active");
+            mapView.classList.add("active");
+            map.invalidateSize();
+          }
+        });
+      });
+
+      map.on("overlayadd", (event) => {
+        if (event.layer === debugLayer && debugOverlay) {
+          debugOverlay.classList.remove("hidden");
+        }
+        if (event.layer === legendLayer && legendOverlay) {
+          legendOverlay.classList.remove("hidden");
+        }
+      });
+      map.on("overlayremove", (event) => {
+        if (event.layer === debugLayer && debugOverlay) {
+          debugOverlay.classList.add("hidden");
+        }
+        if (event.layer === legendLayer && legendOverlay) {
+          legendOverlay.classList.add("hidden");
+        }
+      });
+
+      function iconPathForRow(row) {
+        const label = String(row.label || "").toLowerCase();
+        const group = String(row.group_name || "").toLowerCase();
+        const name = `${label} ${group}`;
+        if (label.includes("5032")) {
+          return "Pictures/towing_barless_transparent.png";
+        }
+        if (label.includes("6074")) {
+          return "Pictures/Champ70_transparent.png";
+        }
+        if (name.includes("towing") || name.includes("tow") || name.includes("??????")) {
+          return "Pictures/TowBar.png";
+        }
+        if (name.includes("loader") || name.includes("??????")) {
+          return "Pictures/Loader.png";
+        }
+        if (name.includes("acu") || name.includes("a/c")) {
+          return "Pictures/TLD ACU.png";
+        }
+        if (name.includes("gpu")) {
+          return "Pictures/TLD GPU.png";
+        }
+        if (name.includes("stair") || name.includes("stairs")) {
+          return "Pictures/staires.png";
+        }
+        if (name.includes("manito")) {
+          return "Pictures/Manito.png";
+        }
+        if (name.includes("tractor") || name.includes("tracktor") || name.includes("trac")) {
+          return "Pictures/Tracktor.png";
+        }
+        return "Pictures/Aviation1.jpg";
+      }
+
+      function markerSizeForZoom(zoom) {
+        const safeZoom = Number.isFinite(zoom) ? zoom : 13;
+        const size = 14 + (safeZoom - 10) * 3;
+        return Math.max(20, Math.min(56, Math.round(size)));
+      }
+
+      function markerIcon(path, size) {
+        const key = `${path}|${size}`;
+        if (!iconCache.has(key)) {
+          iconCache.set(
+            key,
+            L.icon({
+              iconUrl: encodeURI(path),
+              iconSize: [size, size],
+              iconAnchor: [size / 2, size / 2],
+              popupAnchor: [0, -size / 2],
+            })
+          );
+        }
+        return iconCache.get(key);
+      }
+
+      function updateMarkerIcons() {
+        const size = markerSizeForZoom(map.getZoom());
+        Object.values(markers).forEach((marker) => {
+          const iconPath = marker.options.iconPath || "Pictures/Aviation1.jpg";
+          marker.setIcon(markerIcon(iconPath, size));
+        });
+      }
+
+      map.on("zoomend", updateMarkerIcons);
+
+      const LOW_FUEL_THRESHOLD = 20;
+      const LOW_BATTERY_THRESHOLD = 24;
+      const MOVE_DISTANCE_METERS = 10;
+
+      function parseNumber(value) {
+        if (value === null || value === undefined) {
+          return null;
+        }
+        const num = Number(String(value).replace(/[^\d.-]/g, ""));
+        return Number.isFinite(num) ? num : null;
+      }
+
+      function parseBoolean(value) {
+        if (value === null || value === undefined) {
+          return false;
+        }
+        if (typeof value === "boolean") {
+          return value;
+        }
+        const text = String(value).trim().toLowerCase();
+        return text === "on" || text === "true" || text === "1" || text === "yes" || text === "active";
+      }
+
+      function distanceMeters(lat1, lon1, lat2, lon2) {
+        const toRad = (deg) => (deg * Math.PI) / 180;
+        const r = 6371000;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return r * c;
+      }
+
+      function updateDistance(id, lat, lng) {
+        const prev = lastPositions.get(id);
+        lastPositions.set(id, { lat, lng });
+        if (!prev) {
+          return 0;
+        }
+        return distanceMeters(prev.lat, prev.lng, lat, lng);
+      }
+
+      function isMoving(row) {
+        const status = String(row.movement_status || "").toLowerCase();
+        if (status.includes("moving")) {
+          return true;
+        }
+        const speed = parseNumber(row.speed ?? row.Speed);
+        return speed !== null ? speed > 0.5 : false;
+      }
+
+      function isIgnitionOn(row) {
+        const ignition =
+          row.Ignition ??
+          row.ignition ??
+          row["Ignition"] ??
+          row["Ignition status"] ??
+          row["ignition_status"] ??
+          row.input1 ??
+          row["input1"] ??
+          row["Input1"] ??
+          row["Input 1"];
+        if (parseBoolean(ignition)) {
+          return true;
+        }
+        const rpm = parseNumber(row.engine_rpm ?? row["OBD: RPM"]);
+        return rpm !== null ? rpm > 0 : false;
+      }
+
+      function isLoader(row) {
+        const label = String(row.label || "").toLowerCase();
+        const group = String(row.group_name || "").toLowerCase();
+        return label.includes("loader") || group.includes("loader") || label.includes("6074");
+      }
+
+      function isWorking(row, moving) {
+        if (moving) {
+          return false;
+        }
+        if (isIgnitionOn(row)) {
+          return true;
+        }
+        const workingFlag =
+          parseBoolean(row.Working) ||
+          parseBoolean(row.working) ||
+          parseBoolean(row["Working-Stabilizer Extract"]) ||
+          parseBoolean(row["Stabilizer Extract"]) ||
+          parseBoolean(row["Stabilizer_Extract"]);
+        const oilPressure = parseNumber(row["Engine_O.P"] ?? row.Engine_O_P ?? row.Engine_OP);
+        if (workingFlag) {
+          return true;
+        }
+        if (isLoader(row) && oilPressure !== null) {
+          return oilPressure > 2;
+        }
+        return false;
+      }
+
+      function isAlert(row) {
+        const fuel = parseNumber(row.Fuel_level ?? row.Fuel ?? row["Fuel level"]);
+        const battery = parseNumber(
+          row["Battery level"] ??
+            row.battery_level ??
+            row.Voltage ??
+            row.voltage ??
+            row["Board voltage"]
+        );
+        const lowFuel = fuel !== null ? fuel < LOW_FUEL_THRESHOLD : false;
+        const lowBattery = battery !== null ? battery < LOW_BATTERY_THRESHOLD : false;
+        const nextService = parseNumber(row.next_service_hours ?? row["Next Service"]);
+        const alertFlag =
+          parseBoolean(row.Alert) ||
+          parseBoolean(row.alert) ||
+          parseBoolean(row["Repair requested"]);
+        const nextServiceDue = nextService !== null ? nextService <= 0 : false;
+        return lowFuel || nextServiceDue || alertFlag || lowBattery;
+      }
+
+      function statusLabel(row) {
+        return row.movement_status || row.connection_status || "unknown";
+      }
+
+      function statusClass(row, moving, distanceMetersValue) {
+        const rpm = parseNumber(row.engine_rpm ?? row["OBD: RPM"]);
+        const maintenance =
+          parseBoolean(row["Maintenance zone"]) ||
+          parseBoolean(row.maintenance_zone) ||
+          parseBoolean(row["In maintenance"]);
+        const navixyStatus = String(row.movement_status || row.connection_status || "")
+          .toLowerCase()
+          .trim();
+
+        if (isAlert(row)) {
+          return "gse-status-alert";
+        }
+        if (maintenance) {
+          return "gse-status-maintenance";
+        }
+        if (parseNumber(row.Voltage ?? row.voltage) !== null) {
+          const voltage = parseNumber(row.Voltage ?? row.voltage);
+          if (voltage !== null && voltage < LOW_BATTERY_THRESHOLD) {
+            return "gse-status-low-battery";
+          }
+        }
+        if (isWorking(row, moving)) {
+          return "gse-status-working";
+        }
+        if (navixyStatus.includes("moving")) {
+          return "gse-status-moving";
+        }
+        if (navixyStatus.includes("idle")) {
+          return "gse-status-idle";
+        }
+        if (
+          navixyStatus.includes("standstill") ||
+          navixyStatus.includes("park") ||
+          navixyStatus.includes("stopp")
+        ) {
+          return "gse-status-available";
+        }
+        if (navixyStatus.includes("offline")) {
+          return "gse-status-stop";
+        }
+        if (moving || distanceMetersValue > MOVE_DISTANCE_METERS) {
+          return "gse-status-moving";
+        }
+        if (rpm !== null && rpm !== 0) {
+          return "gse-status-in-use";
+        }
+        if (rpm !== null && rpm < 2000 && distanceMetersValue <= MOVE_DISTANCE_METERS) {
+          return "gse-status-idle";
+        }
+        if (isIgnitionOn(row)) {
+          return "gse-status-ignition";
+        }
+        return "gse-status-available";
+      }
+
+      function updateTooltip(marker, text, className) {
+        if (!marker.getTooltip()) {
+          marker.bindTooltip(text, {
+            permanent: true,
+            direction: "top",
+            offset: [0, -12],
+            className: `gse-label ${className}`,
+          });
+          return;
+        }
+        marker.setTooltipContent(text);
+        marker.getTooltip().options.className = `gse-label ${className}`;
+        if (marker.getTooltip()._container) {
+          marker.getTooltip()._container.className = `leaflet-tooltip gse-label ${className}`;
+        }
+      }
+
+      function formatLabel(row) {
+        const label = row.label || row.tracker_id || "";
+        const match = String(label).match(/(\d{4})/);
+        return match ? match[1] : String(label);
+      }
+
+      function formatStatus(row) {
+        return row.movement_status || row.connection_status || "--";
+      }
+
+      function formatSensor(row) {
+        const parts = [];
+        const add = (name, value) => {
+          if (value !== null && value !== undefined && value !== "") {
+            parts.push(`${name}:${value}`);
+          }
+        };
+        add("Fuel", row.Fuel_level ?? row.Fuel);
+        add("Voltage", row["Board voltage"] ?? row.Voltage ?? row.voltage);
+        add("EngTemp", row.Engine_Temp ?? row.engine_temperature);
+        add("EngOP", row["Engine_O.P"]);
+        add("RPM", row.engine_rpm);
+        return parts.length ? parts.join(" | ") : "--";
+      }
+
+      function formatBeacon(row) {
+        const parts = [];
+        const add = (name, value) => {
+          if (value !== null && value !== undefined && value !== "") {
+            parts.push(`${name}:${value}`);
+          }
+        };
+        add("BLE", row["BLE: ID"]);
+        add("EyeBecon", row.EyeBecon);
+        add("Key", row["Hardware key"]);
+        return parts.length ? parts.join(" | ") : "--";
+      }
+
+      function pickValue(row, keys) {
+        for (const key of keys) {
+          const value = row[key];
+          if (value !== null && value !== undefined && value !== "") {
+            return value;
+          }
+        }
+        return null;
+      }
+
+      function formatNumberWithUnits(value, decimals = 2) {
+        if (value === null || value === undefined || value === "") {
+          return value;
+        }
+        const text = String(value);
+        const match = text.match(/-?\d+(?:\.\d+)?/);
+        if (!match) {
+          return value;
+        }
+        const num = Number(match[0]);
+        if (!Number.isFinite(num)) {
+          return value;
+        }
+        const units = text.replace(match[0], "").trim();
+        const formatted = num.toFixed(decimals);
+        return units ? `${formatted} ${units}` : formatted;
+      }
+
+      function formatFieldValue(label, value) {
+        if (value === null || value === undefined || value === "") {
+          return "--";
+        }
+        let text = String(value);
+        if (text.endsWith(" custom")) {
+          text = text.replace(" custom", "");
+        }
+        if (label === "movement_status") {
+          if (text.toLowerCase() === "parked") {
+            return "Standstill";
+          }
+        }
+        if (label === "connection_status") {
+          if (text.toLowerCase() === "active") {
+            return "Online";
+          }
+        }
+        if (label === "engine_hours") {
+          return formatNumberWithUnits(text, 2);
+        }
+        return value;
+      }
+
+      function formatValue(value) {
+        if (value === null || value === undefined || value === "") {
+          return "--";
+        }
+        return `${value}`;
+      }
+
+      function sectionTimestamp(row, section) {
+        if (section.timestampField) {
+          const match = section.fields.find((field) => field.label === section.timestampField);
+          if (match) {
+            return match.updatedKey ? row[match.updatedKey] : null;
+          }
+        }
+        return null;
+      }
+
+      function renderTable(rows) {
+        const head = document.getElementById("gseTableHead");
+        const body = document.getElementById("gseTableBody");
+        if (!head || !body) {
+          return;
+        }
+        head.innerHTML = `<tr>${TABLE_COLUMNS.map((col) => `<th>${col.label}</th>`).join("")}</tr>`;
+        body.innerHTML = rows
+          .map((row) => {
+            const cells = TABLE_COLUMNS.map((col) => {
+              const value = col.value(row);
+              const safeValue = value !== null && value !== undefined && value !== "" ? value : "--";
+              const cls = col.key === "gse" ? " class=\"gse-table-key\"" : "";
+              return `<td${cls}>${safeValue}</td>`;
+            }).join("");
+            return `<tr>${cells}</tr>`;
+          })
+          .join("");
+      }
+
+      function popupHtml(row) {
+        const label = row.label || row.tracker_id || "tracker";
+        const sections = STAR_SECTIONS.map((section) => {
+          const sectionTs = sectionTimestamp(row, section);
+          const headerTs = sectionTs ? `<span class="gse-ts">${sectionTs}</span>` : "";
+          const items = section.fields
+            .map((field) => {
+              const raw = pickValue(row, field.keys);
+              const value = formatFieldValue(field.label, raw);
+              return `<div class="gse-row"><span class="gse-label">${field.label}</span><span class="gse-value">${formatValue(
+                value
+              )}</span></div>`;
+            })
+            .join("");
+          return `<div class="gse-section">${section.title}${headerTs}</div>${items}`;
+        }).join("");
+        return `<div class="gse-popup gse-style-${POPUP_STYLE}"><h4>${label}</h4>${sections}</div>`;
+      }
+
+      function updateMarkers(rows) {
+        isRefreshing = true;
+        if (!map.hasLayer(layer)) {
+          layer.addTo(map);
+        }
+        const bounds = [];
+        const seen = new Set();
+        rows.forEach((row) => {
+          const lat = Number(row.lat);
+          const lng = Number(row.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return;
+          }
+          const label = row.label || row.tracker_id || "tracker";
+          const shortMatch = String(label).match(/(\d{4})/);
+          const shortLabel = shortMatch ? shortMatch[1] : label;
+          const id = String(row.tracker_id || label);
+          const iconPath = iconPathForRow(row);
+          const size = markerSizeForZoom(map.getZoom());
+          const distanceMetersValue = updateDistance(id, lat, lng);
+          const moving = isMoving(row) || distanceMetersValue > MOVE_DISTANCE_METERS;
+          const labelClass = statusClass(row, moving, distanceMetersValue);
+          let marker = markers[id];
+          if (!marker) {
+            marker = L.marker([lat, lng], {
+              icon: markerIcon(iconPath, size),
+              iconPath,
+            })
+              .bindPopup(popupHtml(row));
+            updateTooltip(marker, shortLabel, labelClass);
+            marker.off("click", marker._openPopup);
+            marker.on("click", () => {
+              marker.openPopup();
+              activePopupId = id;
+            });
+            marker.on("popupclose", () => {
+              if (isRefreshing) {
+                return;
+              }
+              if (activePopupId === id) {
+                activePopupId = null;
+              }
+            });
+            markers[id] = marker;
+            marker.addTo(layer);
+          } else {
+            marker.setLatLng([lat, lng]);
+            marker.setIcon(markerIcon(iconPath, size));
+            marker.options.iconPath = iconPath;
+            let popupScrollTop = null;
+            if (activePopupId === id) {
+              const popupEl = marker.getPopup()?.getElement();
+              const contentEl = popupEl?.querySelector(".gse-popup");
+              if (contentEl) {
+                popupScrollTop = contentEl.scrollTop;
+              }
+            }
+            marker.setPopupContent(popupHtml(row));
+            if (popupScrollTop !== null) {
+              setTimeout(() => {
+                const popupEl = marker.getPopup()?.getElement();
+                const contentEl = popupEl?.querySelector(".gse-popup");
+                if (contentEl) {
+                  contentEl.scrollTop = popupScrollTop;
+                }
+              }, 0);
+            }
+            updateTooltip(marker, shortLabel, labelClass);
+          }
+          seen.add(id);
+          if (!String(label).toLowerCase().includes("skoda")) {
+            bounds.push([lat, lng]);
+          }
+        });
+        Object.keys(markers).forEach((key) => {
+          if (!seen.has(key)) {
+            const marker = markers[key];
+            layer.removeLayer(marker);
+            delete markers[key];
+            if (activePopupId === key) {
+              activePopupId = null;
+            }
+          }
+        });
+
+        const statusEl = document.getElementById("mapStatus");
+        const debugEl = document.getElementById("mapDebug");
+        if (statusEl) {
+          statusEl.textContent = `Trackers: ${rows.length} | Markers: ${bounds.length}`;
+        }
+        if (debugEl) {
+          const first = rows.find((row) => Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lng)));
+          const zoom = map.getZoom();
+          debugEl.textContent = first
+            ? `| zoom ${zoom} | ${Number(first.lat).toFixed(5)}, ${Number(first.lng).toFixed(5)}`
+            : `| zoom ${zoom} | no lat/lng`;
+        }
+
+        if (!fitted) {
+          if (bounds.length === 1) {
+            map.setView(bounds[0], 15);
+          } else {
+            map.fitBounds(bounds, { padding: [20, 20] });
+          }
+          fitted = true;
+        }
+        if (activePopupId && markers[activePopupId]) {
+          markers[activePopupId].openPopup();
+        }
+        isRefreshing = false;
+      }
+
+      async function loadData() {
+        try {
+          const response = await fetch(LIVE_API_URL);
+          if (!response.ok) {
+            throw new Error("fetch failed");
+          }
+          const payload = await response.json();
+          lastRows = payload.rows || [];
+          updateMarkers(lastRows);
+          renderTable(lastRows);
+        } catch (error) {
+          const statusEl = document.getElementById("mapStatus");
+          if (statusEl) {
+            statusEl.textContent = "Failed to load live data.";
+          }
+        }
+      }
+
+      loadData();
+      setInterval(loadData, POLL_INTERVAL_MS);
+
+      fetch("llbg_layers.geojson")
+        .then((res) => res.json())
+        .then((data) => {
+          L.geoJSON(data, {
+            pointToLayer: (feature, latlng) =>
+              L.circleMarker(latlng, {
+                radius: 7,
+                color: "#7c3aed",
+                fillColor: "#a855f7",
+                fillOpacity: 0.9,
+                weight: 2,
+              }),
+            onEachFeature: (feature, layer) => {
+              const name = feature.properties?.name || "LLBG point";
+              const source = feature.properties?.source || "";
+              layer.bindTooltip(`${name}`, {
+                direction: "top",
+                permanent: true,
+                opacity: 0.9,
+                className: "llbg-label",
+              });
+              layer.bindPopup(`${name}<br/>${source}`);
+            },
+          }).addTo(llbgLayer);
+        })
+        .catch(() => {});
+
+      // Removed LLBG chart overlays from the layer list.
+    </script>
+  </body>
+</html>
+
+
