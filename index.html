@@ -616,12 +616,55 @@
         `;
       }
 
+      // Track all marker positions to detect overlaps
+      const markerPositions = {};
+
+      function getSpreadOffset(lat, lng, markerId) {
+        const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+        if (!markerPositions[key]) {
+          markerPositions[key] = [];
+        }
+        
+        // Check if this marker is already tracked
+        let index = markerPositions[key].indexOf(markerId);
+        if (index === -1) {
+          markerPositions[key].push(markerId);
+          index = markerPositions[key].length - 1;
+        }
+        
+        const count = markerPositions[key].length;
+        if (count <= 1) return { lat: 0, lng: 0 };
+        
+        // Spread markers in a circle pattern
+        const radius = 0.00015; // ~15 meters
+        const angle = (index / count) * 2 * Math.PI;
+        return {
+          lat: Math.sin(angle) * radius,
+          lng: Math.cos(angle) * radius
+        };
+      }
+
+      function clearMarkerPositions() {
+        Object.keys(markerPositions).forEach(key => {
+          markerPositions[key] = [];
+        });
+      }
+
       function updateBeaconMarkers(trackerRows) {
         // Extract beacons from tracker data
         const beacons = extractBeaconsFromTrackers(trackerRows);
         
         // Track which beacons we've seen this update
         const seenBeacons = new Set();
+
+        // First pass: register all positions (trackers + beacons)
+        trackerRows.forEach(row => {
+          const lat = Number(row.lat);
+          const lng = Number(row.lng);
+          if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            getSpreadOffset(lat, lng, `tracker_${row.tracker_id}`);
+          }
+        });
 
         // Update or create beacon markers
         beacons.forEach(beacon => {
@@ -631,9 +674,10 @@
 
           seenBeacons.add(beacon.id);
 
-          // Beacon at exact tracker location (no offset)
-          const beaconLat = lat;
-          const beaconLng = lng;
+          // Calculate spread offset if multiple markers at same location
+          const offset = getSpreadOffset(lat, lng, `beacon_${beacon.id}`);
+          const beaconLat = lat + offset.lat;
+          const beaconLng = lng + offset.lng;
 
           let marker = beaconMarkers[beacon.id];
           if (!marker) {
@@ -666,6 +710,9 @@
             delete beaconMarkers[id];
           }
         });
+
+        // Clear position tracking for next update
+        clearMarkerPositions();
       }
 
       // Toggle beacon legend visibility with layer
