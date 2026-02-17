@@ -487,11 +487,11 @@
       };
 
       // Known Teltonika Eye Beacons/Sensors (from your inventory)
-      // Map MAC addresses to beacon info
+      // Map MAC addresses to beacon info with name and category
       const KNOWN_BEACONS = {
-        "7CD9F407F95C": { name: "Eye Beacon 1", sn: "1150232331", type: "eye_beacon" },
-        "7CD9F4003536": { name: "Eye Beacon 2", sn: "1149652498", type: "eye_beacon" },
-        "7CD9F4116EE7": { name: "Eye Sensor 1", sn: "1149846140", type: "eye_sensor" },
+        "7CD9F407F95C": { name: "Tow Bar Alpha", sn: "1150232331", type: "eye_beacon", category: "Towed Device" },
+        "7CD9F4003536": { name: "GPU Unit 12", sn: "1149652498", type: "eye_beacon", category: "Equipment" },
+        "7CD9F4116EE7": { name: "Safety Sensor 1", sn: "1149846140", type: "eye_sensor", category: "Safety" },
       };
 
       // Extract beacons from tracker data
@@ -507,7 +507,8 @@
                   mac: beacon.mac,
                   name: knownInfo.name || `Beacon ${beacon.mac.slice(-4)}`,
                   sn: knownInfo.sn,
-                  category: knownInfo.type || "default",
+                  beaconType: knownInfo.type || "default",
+                  category: knownInfo.category || "Uncategorized",
                   battery: beacon.battery,
                   magnetSensors: beacon.magnet_sensors || {},
                   lastSeen: beacon.last_seen,
@@ -539,7 +540,7 @@
       }
 
       function beaconPopupHtml(beacon) {
-        const cat = BEACON_CATEGORIES[beacon.category] || BEACON_CATEGORIES["default"];
+        const typeInfo = BEACON_CATEGORIES[beacon.beaconType] || BEACON_CATEGORIES["default"];
         // Battery is in volts for Teltonika Eye Beacons (3.0V = 100%, 2.0V = 0%)
         const batteryVolts = parseFloat(beacon.battery) || 0;
         const batteryPercent = Math.max(0, Math.min(100, ((batteryVolts - 2.0) / 1.0) * 100));
@@ -556,13 +557,21 @@
               <span class="beacon-row-value">${magnetValues}</span>
             </div>`;
         }
+
+        // Format coordinates
+        const latStr = beacon.lat ? Number(beacon.lat).toFixed(6) : "N/A";
+        const lngStr = beacon.lng ? Number(beacon.lng).toFixed(6) : "N/A";
         
         return `
           <div class="beacon-popup">
-            <h4 class="${beaconCategoryClass(beacon.category)}">${beacon.name}</h4>
+            <h4 class="${beaconCategoryClass(beacon.beaconType)}">${beacon.name}</h4>
+            <div class="beacon-row">
+              <span class="beacon-row-label">Category</span>
+              <span class="beacon-row-value"><strong>${beacon.category}</strong></span>
+            </div>
             <div class="beacon-row">
               <span class="beacon-row-label">Type</span>
-              <span class="beacon-row-value">${cat.label}</span>
+              <span class="beacon-row-value">${typeInfo.label}</span>
             </div>
             <div class="beacon-row">
               <span class="beacon-row-label">MAC</span>
@@ -577,6 +586,10 @@
               <span class="beacon-row-value" style="color:${batteryColor}">${batteryVolts}V (${batteryPercent.toFixed(0)}%)</span>
             </div>
             ${magnetStatus}
+            <div class="beacon-row">
+              <span class="beacon-row-label">Lat / Long</span>
+              <span class="beacon-row-value" style="font-family:monospace;font-size:10px">${latStr}, ${lngStr}</span>
+            </div>
             ${beacon.lastSeen ? `<div class="beacon-row">
               <span class="beacon-row-label">Last Seen</span>
               <span class="beacon-row-value">${beacon.lastSeen}</span>
@@ -610,7 +623,7 @@
           let marker = beaconMarkers[beacon.id];
           if (!marker) {
             marker = L.marker([beaconLat, beaconLng], {
-              icon: createBeaconIcon(beacon.category),
+              icon: createBeaconIcon(beacon.beaconType),
             }).bindPopup(beaconPopupHtml(beacon));
             
             // Add tooltip with beacon name
@@ -618,7 +631,7 @@
               permanent: false,
               direction: "top",
               offset: [0, -12],
-              className: `beacon-label ${beaconCategoryClass(beacon.category)}`,
+              className: `beacon-label ${beaconCategoryClass(beacon.beaconType)}`,
             });
             
             beaconMarkers[beacon.id] = marker;
