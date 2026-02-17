@@ -304,6 +304,115 @@
       .legend-swatch.gse-status-low-battery { background: #fbc02d !important; color: #111827 !important; }
       .leaflet-tooltip.gse-status-alert,
       .legend-swatch.gse-status-alert { background: #ef6c00 !important; }
+
+      /* ===== BEACON / EYEBECON STYLES ===== */
+      .beacon-marker {
+        border-radius: 50%;
+        border: 2px solid rgba(255,255,255,0.9);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: bold;
+        color: white;
+      }
+      .beacon-category-towed { background: #9333ea !important; } /* Purple */
+      .beacon-category-container { background: #2563eb !important; } /* Blue */
+      .beacon-category-equipment { background: #059669 !important; } /* Green */
+      .beacon-category-personnel { background: #dc2626 !important; } /* Red */
+      .beacon-category-vehicle { background: #ea580c !important; } /* Orange */
+      .beacon-category-eye_beacon { background: #9333ea !important; } /* Purple - Eye Beacon */
+      .beacon-category-eye_sensor { background: #2563eb !important; } /* Blue - Eye Sensor */
+      .beacon-category-default { background: #6b7280 !important; } /* Gray */
+
+      .leaflet-tooltip.beacon-label {
+        border-radius: 4px;
+        color: #ffffff !important;
+        font-weight: 600;
+        font-size: 10px;
+        padding: 2px 5px;
+        border: 1px solid rgba(0, 0, 0, 0.3) !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+      }
+      .leaflet-tooltip.beacon-category-towed { background: #9333ea !important; }
+      .leaflet-tooltip.beacon-category-container { background: #2563eb !important; }
+      .leaflet-tooltip.beacon-category-equipment { background: #059669 !important; }
+      .leaflet-tooltip.beacon-category-personnel { background: #dc2626 !important; }
+      .leaflet-tooltip.beacon-category-vehicle { background: #ea580c !important; }
+      .leaflet-tooltip.beacon-category-eye_beacon { background: #9333ea !important; }
+      .leaflet-tooltip.beacon-category-eye_sensor { background: #2563eb !important; }
+      .leaflet-tooltip.beacon-category-default { background: #6b7280 !important; }
+
+      .beacon-popup {
+        font-family: "Segoe UI", Arial, sans-serif;
+        font-size: 11px;
+        line-height: 1.4;
+        min-width: 180px;
+      }
+      .beacon-popup h4 {
+        margin: 0 0 8px;
+        padding-bottom: 4px;
+        border-bottom: 2px solid;
+        font-size: 13px;
+      }
+      .beacon-popup h4.beacon-category-towed { border-color: #9333ea; color: #9333ea; }
+      .beacon-popup h4.beacon-category-container { border-color: #2563eb; color: #2563eb; }
+      .beacon-popup h4.beacon-category-equipment { border-color: #059669; color: #059669; }
+      .beacon-popup h4.beacon-category-personnel { border-color: #dc2626; color: #dc2626; }
+      .beacon-popup h4.beacon-category-vehicle { border-color: #ea580c; color: #ea580c; }
+      .beacon-popup h4.beacon-category-eye_beacon { border-color: #9333ea; color: #9333ea; }
+      .beacon-popup h4.beacon-category-eye_sensor { border-color: #2563eb; color: #2563eb; }
+      .beacon-popup h4.beacon-category-default { border-color: #6b7280; color: #6b7280; }
+      .beacon-popup .beacon-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 2px 0;
+      }
+      .beacon-popup .beacon-row-label {
+        color: #64748b;
+        font-weight: 500;
+      }
+      .beacon-popup .beacon-row-value {
+        color: #0f172a;
+        font-weight: 600;
+      }
+      .beacon-popup .beacon-host {
+        margin-top: 8px;
+        padding-top: 6px;
+        border-top: 1px dashed #cbd5e1;
+        font-size: 10px;
+        color: #64748b;
+      }
+
+      .map-overlay.beacon-legend {
+        top: auto;
+        bottom: 180px;
+        left: 56px;
+        background: rgba(148, 163, 184, 0.8);
+        color: #0f172a;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        font-size: 11px;
+      }
+      .map-overlay.beacon-legend .legend-title {
+        font-weight: 700;
+        font-size: 12px;
+        margin-bottom: 2px;
+      }
+      .beacon-legend-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .beacon-legend-swatch {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        border: 2px solid white;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      }
     </style>
   </head>
   <body>
@@ -331,6 +440,11 @@
         <div class="legend-row"><span class="legend-swatch gse-status-low-battery"></span>Low battery</div>
         <div class="legend-row"><span class="legend-swatch gse-status-alert"></span>Alert</div>
       </div>
+      <div id="beaconLegend" class="map-overlay beacon-legend">
+        <div class="legend-title">📡 Teltonika Eye Tags</div>
+        <div class="beacon-legend-row"><span class="beacon-legend-swatch beacon-category-eye_beacon"></span>Eye Beacon</div>
+        <div class="beacon-legend-row"><span class="beacon-legend-swatch beacon-category-eye_sensor"></span>Eye Sensor</div>
+      </div>
     </div>
     <div id="tableView" class="view-panel table-view">
       <div class="table-container">
@@ -347,7 +461,7 @@
       crossorigin=""
     ></script>
     <script>
-      const LIVE_API_URL = "https://britain-reaction-hotels-euros.trycloudflare.com/data";
+      const LIVE_API_URL = "http://127.0.0.1:8765/data";
       const POPUP_STYLE = "outline"; // soft | outline | compact
       const POLL_INTERVAL_MS = 2000;
       const map = L.map("map").setView([32.004, 34.876], 13);
@@ -355,7 +469,185 @@
       const llbgLayer = L.layerGroup();
       const debugLayer = L.layerGroup();
       const legendLayer = L.layerGroup();
+      const beaconLayer = L.layerGroup().addTo(map); // Beacon layer - enabled by default
       const chartLayers = {};
+      const beaconMarkers = {}; // Store beacon markers separately
+
+      // ===== BEACON CATEGORY CONFIGURATION =====
+      // Categories based on MAC prefix or user-defined mapping
+      const BEACON_CATEGORIES = {
+        "towed": { color: "#9333ea", label: "Towed Device", icon: "◆" },
+        "container": { color: "#2563eb", label: "Container", icon: "■" },
+        "equipment": { color: "#059669", label: "Equipment", icon: "●" },
+        "personnel": { color: "#dc2626", label: "Personnel", icon: "▲" },
+        "vehicle": { color: "#ea580c", label: "Vehicle", icon: "★" },
+        "eye_beacon": { color: "#9333ea", label: "Eye Beacon", icon: "●" },
+        "eye_sensor": { color: "#2563eb", label: "Eye Sensor", icon: "◆" },
+        "default": { color: "#6b7280", label: "Other", icon: "●" }
+      };
+
+      // Known Teltonika Eye Beacons/Sensors (from your inventory)
+      // Map MAC addresses to beacon info
+      const KNOWN_BEACONS = {
+        "7CD9F407F95C": { name: "Eye Beacon 1", sn: "1150232331", type: "eye_beacon" },
+        "7CD9F4003536": { name: "Eye Beacon 2", sn: "1149652498", type: "eye_beacon" },
+        "7CD9F4116EE7": { name: "Eye Sensor 1", sn: "1149846140", type: "eye_sensor" },
+      };
+
+      // Extract beacons from tracker data
+      function extractBeaconsFromTrackers(rows) {
+        const beacons = [];
+        rows.forEach(row => {
+          if (row.beacons && Array.isArray(row.beacons)) {
+            row.beacons.forEach(beacon => {
+              if (beacon.mac) {
+                const knownInfo = KNOWN_BEACONS[beacon.mac.toUpperCase()] || {};
+                beacons.push({
+                  id: beacon.mac,
+                  mac: beacon.mac,
+                  name: knownInfo.name || `Beacon ${beacon.mac.slice(-4)}`,
+                  sn: knownInfo.sn,
+                  category: knownInfo.type || "default",
+                  battery: beacon.battery,
+                  magnetSensors: beacon.magnet_sensors || {},
+                  lastSeen: beacon.last_seen,
+                  hostTrackerId: row.tracker_id,
+                  hostTrackerLabel: row.label,
+                  lat: row.lat,
+                  lng: row.lng,
+                });
+              }
+            });
+          }
+        });
+        return beacons;
+      }
+
+      function beaconCategoryClass(category) {
+        return BEACON_CATEGORIES[category] ? `beacon-category-${category}` : "beacon-category-default";
+      }
+
+      function createBeaconIcon(category, size = 20) {
+        const cat = BEACON_CATEGORIES[category] || BEACON_CATEGORIES["default"];
+        return L.divIcon({
+          className: `beacon-marker ${beaconCategoryClass(category)}`,
+          html: `<span style="font-size:${size * 0.6}px">${cat.icon}</span>`,
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size / 2],
+          popupAnchor: [0, -size / 2],
+        });
+      }
+
+      function beaconPopupHtml(beacon) {
+        const cat = BEACON_CATEGORIES[beacon.category] || BEACON_CATEGORIES["default"];
+        // Battery is in volts for Teltonika Eye Beacons (3.0V = 100%, 2.0V = 0%)
+        const batteryVolts = parseFloat(beacon.battery) || 0;
+        const batteryPercent = Math.max(0, Math.min(100, ((batteryVolts - 2.0) / 1.0) * 100));
+        const batteryColor = batteryPercent > 50 ? "#059669" : batteryPercent > 20 ? "#ea580c" : "#dc2626";
+        
+        // Magnet sensor status
+        let magnetStatus = "";
+        if (beacon.magnetSensors && Object.keys(beacon.magnetSensors).length > 0) {
+          const magnetValues = Object.entries(beacon.magnetSensors)
+            .map(([k, v]) => `${k.replace("magnet_", "M")}: ${v === "1" ? "ON" : "OFF"}`)
+            .join(", ");
+          magnetStatus = `<div class="beacon-row">
+              <span class="beacon-row-label">Magnet Sensors</span>
+              <span class="beacon-row-value">${magnetValues}</span>
+            </div>`;
+        }
+        
+        return `
+          <div class="beacon-popup">
+            <h4 class="${beaconCategoryClass(beacon.category)}">${beacon.name}</h4>
+            <div class="beacon-row">
+              <span class="beacon-row-label">Type</span>
+              <span class="beacon-row-value">${cat.label}</span>
+            </div>
+            <div class="beacon-row">
+              <span class="beacon-row-label">MAC</span>
+              <span class="beacon-row-value" style="font-family:monospace">${beacon.mac}</span>
+            </div>
+            ${beacon.sn ? `<div class="beacon-row">
+              <span class="beacon-row-label">S/N</span>
+              <span class="beacon-row-value">${beacon.sn}</span>
+            </div>` : ""}
+            <div class="beacon-row">
+              <span class="beacon-row-label">Battery</span>
+              <span class="beacon-row-value" style="color:${batteryColor}">${batteryVolts}V (${batteryPercent.toFixed(0)}%)</span>
+            </div>
+            ${magnetStatus}
+            ${beacon.lastSeen ? `<div class="beacon-row">
+              <span class="beacon-row-label">Last Seen</span>
+              <span class="beacon-row-value">${beacon.lastSeen}</span>
+            </div>` : ""}
+            <div class="beacon-host">
+              📍 Location from: <strong>${beacon.hostTrackerLabel || beacon.hostTrackerId}</strong>
+            </div>
+          </div>
+        `;
+      }
+
+      function updateBeaconMarkers(trackerRows) {
+        // Extract beacons from tracker data
+        const beacons = extractBeaconsFromTrackers(trackerRows);
+        
+        // Track which beacons we've seen this update
+        const seenBeacons = new Set();
+
+        // Update or create beacon markers
+        beacons.forEach(beacon => {
+          const lat = Number(beacon.lat);
+          const lng = Number(beacon.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+          seenBeacons.add(beacon.id);
+
+          // Offset beacon slightly from tracker to avoid overlap (consistent offset per beacon)
+          const hash = beacon.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+          const offsetLat = ((hash % 100) - 50) * 0.00002;
+          const offsetLng = (((hash * 7) % 100) - 50) * 0.00002;
+          const beaconLat = lat + offsetLat;
+          const beaconLng = lng + offsetLng;
+
+          let marker = beaconMarkers[beacon.id];
+          if (!marker) {
+            marker = L.marker([beaconLat, beaconLng], {
+              icon: createBeaconIcon(beacon.category),
+            }).bindPopup(beaconPopupHtml(beacon));
+            
+            // Add tooltip with beacon name
+            marker.bindTooltip(beacon.name || beacon.id, {
+              permanent: false,
+              direction: "top",
+              offset: [0, -12],
+              className: `beacon-label ${beaconCategoryClass(beacon.category)}`,
+            });
+            
+            beaconMarkers[beacon.id] = marker;
+            marker.addTo(beaconLayer);
+          } else {
+            marker.setLatLng([beaconLat, beaconLng]);
+            marker.setPopupContent(beaconPopupHtml(beacon));
+          }
+        });
+
+        // Remove markers for beacons no longer seen
+        Object.keys(beaconMarkers).forEach(id => {
+          if (!seenBeacons.has(id)) {
+            beaconLayer.removeLayer(beaconMarkers[id]);
+            delete beaconMarkers[id];
+          }
+        });
+      }
+
+      // Toggle beacon legend visibility with layer
+      beaconLayer.on("add", () => {
+        document.getElementById("beaconLegend")?.classList.remove("hidden");
+      });
+      beaconLayer.on("remove", () => {
+        document.getElementById("beaconLegend")?.classList.add("hidden");
+      });
 
       const osmStreets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
@@ -389,6 +681,7 @@
         .addTo(map);
       layersControl.addOverlay(debugLayer, "Debug");
       layersControl.addOverlay(legendLayer, "GSE Legend");
+      layersControl.addOverlay(beaconLayer, "🔵 Eyebecon Tags");
 
       const markers = {};
       let fitted = false;
@@ -1066,6 +1359,8 @@
           lastRows = payload.rows || [];
           updateMarkers(lastRows);
           renderTable(lastRows);
+          // Update beacon markers from real tracker data
+          updateBeaconMarkers(lastRows);
         } catch (error) {
           const statusEl = document.getElementById("mapStatus");
           if (statusEl) {

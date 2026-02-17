@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import requests
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 
 API_BASE_URL = os.environ.get("NAVIXY_BASE_URL", "https://api.navixy.com/v2")
 API_HASH = os.environ.get("NAVIXY_API_HASH")  # required
@@ -161,6 +161,63 @@ def _extract_readings(readings: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+def _extract_beacons(state: Dict[str, Any], readings: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract Eye Beacon/Sensor data from tracker state"""
+    beacons = []
+    additional = state.get("additional", {}) if isinstance(state, dict) else {}
+    
+    # Check for BLE beacon data
+    ble_beacon_id = additional.get("ble_beacon_id", {}).get("value")
+    hardware_key = additional.get("hardware_key", {}).get("value")
+    
+    # Get the MAC address (last 12 chars of the full ID)
+    beacon_mac = None
+    if ble_beacon_id:
+        beacon_mac = ble_beacon_id[-12:].upper() if len(ble_beacon_id) >= 12 else ble_beacon_id.upper()
+    elif hardware_key:
+        beacon_mac = hardware_key[-12:].upper() if len(hardware_key) >= 12 else hardware_key.upper()
+    
+    if beacon_mac:
+        # Get last seen timestamp
+        last_seen = additional.get("ble_beacon_id", {}).get("updated") or additional.get("hardware_key", {}).get("updated")
+        
+        # Filter out old beacon data (more than 24 hours old)
+        if last_seen:
+            from datetime import datetime, timedelta
+            try:
+                last_seen_dt = datetime.strptime(last_seen, "%Y-%m-%d %H:%M:%S")
+                if datetime.now() - last_seen_dt > timedelta(hours=24):
+                    # Skip old beacon data
+                    return beacons
+            except:
+                pass
+        
+        # Get beacon battery from virtual sensors
+        battery = None
+        for vs in readings.get("virtual_sensors", []) or []:
+            label = (vs.get("label") or vs.get("name", "")).lower()
+            if "eyebecon" in label or "eye beacon" in label or "ble" in label:
+                battery = vs.get("value")
+                break
+        
+        # Get magnet sensor states
+        magnet_sensors = {}
+        for i in range(1, 5):
+            key = f"ble_magnet_sensor_{i}"
+            if key in additional:
+                magnet_sensors[f"magnet_{i}"] = additional[key].get("value")
+        
+        beacon = {
+            "mac": beacon_mac,
+            "battery": battery,
+            "magnet_sensors": magnet_sensors,
+            "last_seen": last_seen,
+        }
+        beacons.append(beacon)
+    
+    return beacons
+
+
 def _build_row(tracker: Dict[str, Any], state: Dict[str, Any], readings: Dict[str, Any]) -> Dict[str, Any]:
     gps = state.get("gps", {}) if isinstance(state, dict) else {}
     lat = _safe_get(state, "gps", "location", "lat")
@@ -228,7 +285,26 @@ def _build_row(tracker: Dict[str, Any], state: Dict[str, Any], readings: Dict[st
             "Ignition__updated": ignition_updated,
         }
     )
+    
+    # Add beacon data
+    beacons = _extract_beacons(state, readings)
+    row["beacons"] = beacons
+    
     return row
+
+
+@app.get("/")
+def index() -> Any:
+    """Serve the main map page"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return send_from_directory(base_dir, "index.html")
+
+
+@app.get("/<path:filename>")
+def static_files(filename: str) -> Any:
+    """Serve static files (geojson, etc.)"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return send_from_directory(base_dir, filename)
 
 
 @app.get("/health")
