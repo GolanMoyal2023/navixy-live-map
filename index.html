@@ -494,6 +494,17 @@
         "7CD9F4116EE7": { name: "Safety Sensor 1", sn: "1149846140", type: "eye_sensor", category: "Safety" },
       };
 
+      // Category icons and colors
+      const CATEGORY_CONFIG = {
+        "Towed Device": { icon: "🚜", color: "#9333ea" },
+        "Equipment": { icon: "⚙️", color: "#2563eb" },
+        "Safety": { icon: "🛡️", color: "#059669" },
+        "Container": { icon: "📦", color: "#ea580c" },
+        "Personnel": { icon: "👷", color: "#dc2626" },
+        "Vehicle": { icon: "🚗", color: "#7c3aed" },
+        "Uncategorized": { icon: "📍", color: "#6b7280" },
+      };
+
       // Extract beacons from tracker data
       function extractBeaconsFromTrackers(rows) {
         const beacons = [];
@@ -528,11 +539,11 @@
         return BEACON_CATEGORIES[category] ? `beacon-category-${category}` : "beacon-category-default";
       }
 
-      function createBeaconIcon(category, size = 20) {
-        const cat = BEACON_CATEGORIES[category] || BEACON_CATEGORIES["default"];
+      function createBeaconIcon(beaconType, assetCategory, size = 24) {
+        const catConfig = CATEGORY_CONFIG[assetCategory] || CATEGORY_CONFIG["Uncategorized"];
         return L.divIcon({
-          className: `beacon-marker ${beaconCategoryClass(category)}`,
-          html: `<span style="font-size:${size * 0.6}px">${cat.icon}</span>`,
+          className: `beacon-marker`,
+          html: `<div style="background:${catConfig.color};width:${size}px;height:${size}px;border-radius:50%;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:${size * 0.55}px">${catConfig.icon}</div>`,
           iconSize: [size, size],
           iconAnchor: [size / 2, size / 2],
           popupAnchor: [0, -size / 2],
@@ -541,14 +552,16 @@
 
       function beaconPopupHtml(beacon) {
         const typeInfo = BEACON_CATEGORIES[beacon.beaconType] || BEACON_CATEGORIES["default"];
+        const catConfig = CATEGORY_CONFIG[beacon.category] || CATEGORY_CONFIG["Uncategorized"];
+        
         // Battery is in volts for Teltonika Eye Beacons (3.0V = 100%, 2.0V = 0%)
         const batteryVolts = parseFloat(beacon.battery) || 0;
         const batteryPercent = Math.max(0, Math.min(100, ((batteryVolts - 2.0) / 1.0) * 100));
         const batteryColor = batteryPercent > 50 ? "#059669" : batteryPercent > 20 ? "#ea580c" : "#dc2626";
         
-        // Magnet sensor status
+        // Magnet sensor status - ONLY for Eye Sensor type
         let magnetStatus = "";
-        if (beacon.magnetSensors && Object.keys(beacon.magnetSensors).length > 0) {
+        if (beacon.beaconType === "eye_sensor" && beacon.magnetSensors && Object.keys(beacon.magnetSensors).length > 0) {
           const magnetValues = Object.entries(beacon.magnetSensors)
             .map(([k, v]) => `${k.replace("magnet_", "M")}: ${v === "1" ? "ON" : "OFF"}`)
             .join(", ");
@@ -564,10 +577,12 @@
         
         return `
           <div class="beacon-popup">
-            <h4 class="${beaconCategoryClass(beacon.beaconType)}">${beacon.name}</h4>
-            <div class="beacon-row">
-              <span class="beacon-row-label">Category</span>
-              <span class="beacon-row-value"><strong>${beacon.category}</strong></span>
+            <div class="beacon-header" style="background:${catConfig.color};color:white;padding:8px 12px;margin:-12px -12px 10px -12px;border-radius:4px 4px 0 0;display:flex;align-items:center;gap:8px;">
+              <span style="font-size:20px">${catConfig.icon}</span>
+              <div>
+                <div style="font-weight:700;font-size:13px">${beacon.category}</div>
+                <div style="font-size:11px;opacity:0.9">${beacon.name}</div>
+              </div>
             </div>
             <div class="beacon-row">
               <span class="beacon-row-label">Type</span>
@@ -623,15 +638,17 @@
           let marker = beaconMarkers[beacon.id];
           if (!marker) {
             marker = L.marker([beaconLat, beaconLng], {
-              icon: createBeaconIcon(beacon.beaconType),
+              icon: createBeaconIcon(beacon.beaconType, beacon.category),
             }).bindPopup(beaconPopupHtml(beacon));
             
-            // Add tooltip with beacon name
-            marker.bindTooltip(beacon.name || beacon.id, {
+            // Add tooltip with beacon name and category icon
+            const catConfig = CATEGORY_CONFIG[beacon.category] || CATEGORY_CONFIG["Uncategorized"];
+            marker.bindTooltip(`${catConfig.icon} ${beacon.name || beacon.id}`, {
               permanent: false,
               direction: "top",
               offset: [0, -12],
-              className: `beacon-label ${beaconCategoryClass(beacon.beaconType)}`,
+              className: `beacon-label`,
+              opacity: 0.95,
             });
             
             beaconMarkers[beacon.id] = marker;
