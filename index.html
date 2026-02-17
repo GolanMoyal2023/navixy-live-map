@@ -603,12 +603,9 @@
 
           seenBeacons.add(beacon.id);
 
-          // Offset beacon slightly from tracker to avoid overlap (consistent offset per beacon)
-          const hash = beacon.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-          const offsetLat = ((hash % 100) - 50) * 0.00002;
-          const offsetLng = (((hash * 7) % 100) - 50) * 0.00002;
-          const beaconLat = lat + offsetLat;
-          const beaconLng = lng + offsetLng;
+          // Beacon at exact tracker location (no offset)
+          const beaconLat = lat;
+          const beaconLng = lng;
 
           let marker = beaconMarkers[beacon.id];
           if (!marker) {
