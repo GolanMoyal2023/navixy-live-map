@@ -556,22 +556,34 @@
     <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
     <!-- Optional: load config.js to set window.NAVIXY_MAP_API_BASE for production (GitHub Pages) -->
     <script src="config.js"></script>
-    <!-- For GitHub Pages: set API base in config.js (see config.js.example). On github.io we never use localhost. -->
+    <!-- Local (127.0.0.1) when opened from server PC; public URL when from GitHub Pages (e.g. mobile). -->
     <script>
       (function(){
-        var isGitHubPages = typeof location !== "undefined" && location.hostname && location.hostname.indexOf("github.io") !== -1;
-        var base = (typeof window !== "undefined" && window.NAVIXY_MAP_API_BASE)
-          ? String(window.NAVIXY_MAP_API_BASE).replace(/:8767\/?$|:8768\/?$|\/data\/?$/, "")
-          : "http://127.0.0.1";
+        var host = (typeof location !== "undefined" && location.hostname) ? location.hostname : "";
+        var isLocal = host === "127.0.0.1" || host === "localhost";
+        var base;
+        if (isLocal) {
+          base = (window.NAVIXY_MAP_API_BASE) ? String(window.NAVIXY_MAP_API_BASE).replace(/:8767\/?$|:8768\/?$|\/data\/?$/, "") : "http://127.0.0.1";
+        } else {
+          base = (window.NAVIXY_MAP_API_BASE_PUBLIC) ? String(window.NAVIXY_MAP_API_BASE_PUBLIC).replace(/:8767\/?$|:8768\/?$|\/data\/?$/, "") : (window.NAVIXY_MAP_API_BASE ? String(window.NAVIXY_MAP_API_BASE).replace(/:8767\/?$|:8768\/?$|\/data\/?$/, "") : "https://navixy-livemap.moyals.net");
+        }
         window.__NAVIXY_API_BASE = base;
       })();
     </script>
     <script>
-      const DATA_SOURCES = (typeof window !== "undefined" && window.NAVIXY_MAP_DATA_SOURCES) ? window.NAVIXY_MAP_DATA_SOURCES : {
-        motorized_gse: window.__NAVIXY_API_BASE + ":8767/data",
-        direct: window.__NAVIXY_API_BASE + ":8768/data",
-        both: null,
-      };
+      (function(){
+        var base = window.__NAVIXY_API_BASE || "http://127.0.0.1";
+        var useSingleData = base.indexOf("https://") === 0 || base.indexOf("http://") === 0 && base.indexOf("127.0.0.1") === -1;
+        if (window.NAVIXY_MAP_DATA_SOURCES) {
+          window.__NAVIXY_DATA_SOURCES = window.NAVIXY_MAP_DATA_SOURCES;
+        } else if (useSingleData) {
+          var dataUrl = base.replace(/\/?$/, "") + "/data";
+          window.__NAVIXY_DATA_SOURCES = { motorized_gse: dataUrl, direct: dataUrl, both: null };
+        } else {
+          window.__NAVIXY_DATA_SOURCES = { motorized_gse: base + ":8767/data", direct: base + ":8768/data", both: null };
+        }
+      })();
+      const DATA_SOURCES = window.__NAVIXY_DATA_SOURCES;
       // Real beacon positions (dev station) – used for Direct when broker returns wrong/empty data
       const DIRECT_BEACON_POSITIONS_FALLBACK = {
         "7cd9f407f95c": { lat: 32.3119616, lng: 34.9324433, name: "Eybe2plus1", category: "Towed Device", type: "eye_beacon", last_tracker_label: "Direct" },
