@@ -458,6 +458,18 @@
         font-size: 12px;
         margin-bottom: 2px;
       }
+      .beacon-legend-toggle { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,0.1); }
+      .beacon-legend-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; user-select: none; }
+      .beacon-legend-label input[type="checkbox"] { cursor: pointer; }
+      .options-box {
+        top: 10px;
+        right: 10px;
+        left: auto;
+        padding: 8px 12px;
+        min-width: 220px;
+        z-index: 1000;
+      }
+      .options-box .legend-title { margin-bottom: 6px; font-size: 11px; }
       .beacon-legend-row {
         display: flex;
         align-items: center;
@@ -479,11 +491,19 @@
     </div>
     <div class="data-source-toggle">
       <span class="source-label">Data:</span>
-      <button class="source-btn active" data-source="navixy" onclick="switchDataSource('navixy')">Navixy</button>
-      <button class="source-btn" data-source="teltonika_direct" onclick="switchDataSource('teltonika_direct')">Direct</button>
+      <button class="source-btn" data-source="motorized_gse" onclick="switchDataSource('motorized_gse')">Motorized GSE</button>
+      <button class="source-btn" data-source="direct" onclick="switchDataSource('direct')">Direct</button>
+      <button class="source-btn active" data-source="both" onclick="switchDataSource('both')">Both</button>
     </div>
     <div id="mapView" class="view-panel active">
       <div id="map"></div>
+      <div id="optionsBox" class="map-overlay options-box beacon-legend">
+        <div class="legend-title">Options</div>
+        <label class="beacon-legend-label" title="Show or hide X-GPS (Human Agent) tracker on map">
+          <input type="checkbox" id="toggleXGpsOptions" checked aria-label="X-GPS Object (Human Agent tracker)">
+          <span style="color:#0ea5e9;font-size:14px">📍</span> X-GPS Object (Human Agent tracker)
+        </label>
+      </div>
       <div class="map-overlay">
         <span id="mapStatus">Loading...</span>
         <button id="clearPopup" type="button">Clear</button>
@@ -506,10 +526,16 @@
         <div class="legend-title">📡 Eye Beacon Categories</div>
         <div class="beacon-legend-row"><span style="color:#9333ea;font-size:14px">◆</span> Towed Device</div>
         <div class="beacon-legend-row"><span style="color:#2563eb;font-size:14px">■</span> Equipment</div>
-        <div class="beacon-legend-row"><span style="color:#059669;font-size:14px">▲</span> Safety</div>
+        <div class="beacon-legend-row"><span style="color:#ea580c;font-size:14px">★</span> Safety</div>
         <div class="beacon-legend-row"><span style="color:#ea580c;font-size:14px">●</span> Container</div>
         <div class="beacon-legend-row"><span style="color:#dc2626;font-size:14px">★</span> Personnel</div>
         <div class="beacon-legend-row"><span style="color:#7c3aed;font-size:14px">⬡</span> Vehicle</div>
+        <div class="beacon-legend-row beacon-legend-toggle">
+          <label class="beacon-legend-label">
+            <input type="checkbox" id="toggleXGps" checked>
+            <span style="color:#0ea5e9;font-size:14px">📍</span> X-GPS Object (Human Agent tracker)
+          </label>
+        </div>
       </div>
     </div>
     <div id="tableView" class="view-panel table-view">
@@ -528,48 +554,61 @@
     ></script>
     <!-- Marker Clustering for large scale -->
     <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+    <!-- Optional: load config.js to set window.NAVIXY_MAP_API_BASE for production (GitHub Pages) -->
+    <script src="config.js"></script>
+    <!-- For GitHub Pages: set API base in config.js (see config.js.example) -->
     <script>
-      // Data source configuration
-      // For now we always point the UI to localhost ports.
-      // This works when you run the map from a browser on the same machine
-      // that is running the Navixy API (8767) or Teltonika broker (8768).
-      // Remote customer access will require a stable public URL / tunnel.
-      const DATA_SOURCES = {
-        navixy: "http://127.0.0.1:8767/data",  // Optional Navixy server.py
-        teltonika_direct: "http://127.0.0.1:8768/data",  // Local broker
+      var __API_BASE = (typeof window !== "undefined" && window.NAVIXY_MAP_API_BASE) ? String(window.NAVIXY_MAP_API_BASE).replace(/:8767\/?$|:8768\/?$|\/data\/?$/, "") : "http://127.0.0.1";
+    </script>
+    <script>
+      const DATA_SOURCES = (typeof window !== "undefined" && window.NAVIXY_MAP_DATA_SOURCES) ? window.NAVIXY_MAP_DATA_SOURCES : {
+        motorized_gse: __API_BASE + ":8767/data",
+        direct: __API_BASE + ":8768/data",
+        both: null,
       };
-      let currentDataSource = "teltonika_direct"; // Use broker for BLE data
+      // Real beacon positions (dev station) – used for Direct when broker returns wrong/empty data
+      const DIRECT_BEACON_POSITIONS_FALLBACK = {
+        "7cd9f407f95c": { lat: 32.3119616, lng: 34.9324433, name: "Eybe2plus1", category: "Towed Device", type: "eye_beacon", last_tracker_label: "Direct" },
+        "7cd9f4003536": { lat: 32.3094883, lng: 34.9303666, name: "Eybe2plus2", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
+        "7cd9f406427b": { lat: 32.308865, lng: 34.93079, name: "EyeBe3", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
+        "7cd9f407a2db": { lat: 32.3142616, lng: 34.9349766, name: "EyeBe4", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
+        "7cd9f4116ee7": { lat: 32.310117, lng: 34.932402, name: "Eysen2plus", category: "Safety", type: "eye_sensor", last_tracker_label: "Direct" },
+      };
+      let currentDataSource = "both";
       let LIVE_API_URL = DATA_SOURCES[currentDataSource];
+      let showXGpsMarkers = true;
       
       const POPUP_STYLE = "outline"; // soft | outline | compact
-      const POLL_INTERVAL_MS = 2000;
+      const POLL_INTERVAL_MS = 5000; // 5s – avoid constant "Loading…" and reduce server load
       
-      // Function to switch data source
       function switchDataSource(source) {
         currentDataSource = source;
         LIVE_API_URL = DATA_SOURCES[source];
-        console.log(`Switched to ${source}: ${LIVE_API_URL}`);
+        console.log(`Switched to ${source}`);
         
-        // Update button states
         document.querySelectorAll('.source-btn').forEach(btn => {
           btn.classList.toggle('active', btn.dataset.source === source);
         });
-        
-        // Clear existing markers and fetch new data
         layer.clearLayers();
         beaconLayer.clearLayers();
+        Object.keys(markers).forEach(k => { delete markers[k]; });
         Object.keys(beaconMarkers).forEach(k => delete beaconMarkers[k]);
-        fetchLive();
+        if (source === "direct") Object.keys(blePositions).forEach(k => { delete blePositions[k]; });
+        xGpsLayer.clearLayers();
+        Object.keys(markersXgps).forEach(k => { delete markersXgps[k]; });
+        hasLoadedOnce = false;
+        loadData();
       }
       const map = L.map("map").setView([32.004, 34.876], 13);
       const layer = L.layerGroup().addTo(map);
+      const xGpsLayer = L.layerGroup().addTo(map); // X-GPS (Human tracker) – show/hide via Options or layer control
       const llbgLayer = L.layerGroup();
       const debugLayer = L.layerGroup();
       const legendLayer = L.layerGroup();
-      // Beacon layer - using simple layerGroup (MarkerCluster can be enabled for 800+ markers)
       const beaconLayer = L.layerGroup().addTo(map);
       const chartLayers = {};
-      const beaconMarkers = {}; // Store beacon markers separately
+      const beaconMarkers = {};
+      const markersXgps = {}; // X-GPS markers (Golan-X-GPS / SKODA) – separate layer so layer control can hide them
 
       // ===== BEACON CATEGORY CONFIGURATION =====
       // Categories based on MAC prefix or user-defined mapping
@@ -584,24 +623,25 @@
         "default": { color: "#6b7280", label: "Other", icon: "●" }
       };
 
-      // Known Teltonika Eye Beacons/Sensors (from your inventory)
-      // Map MAC addresses (as reported by Navixy) to beacon info
+      // Known Teltonika Eye Beacons/Sensors (matches BLE_Definitions + seed_beacon_data.sql)
       const KNOWN_BEACONS = {
-        // Actual MACs from Navixy API (uppercase)
         "7CD9F407F95C": { name: "Eybe2plus1", sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
         "7CD9F4003536": { name: "Eybe2plus2", sn: "6204011168", type: "eye_beacon", category: "Equipment" },
+        "7CD9F406427B": { name: "EyeBe3", sn: "", type: "eye_beacon", category: "Equipment" },
+        "7CD9F407A2DB": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7CD9F4116EE7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
-        // Lowercase versions
         "7cd9f407f95c": { name: "Eybe2plus1", sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
         "7cd9f4003536": { name: "Eybe2plus2", sn: "6204011168", type: "eye_beacon", category: "Equipment" },
+        "7cd9f406427b": { name: "EyeBe3", sn: "", type: "eye_beacon", category: "Equipment" },
+        "7cd9f407a2db": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f4116ee7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
       };
 
-      // Category icons and colors - using geometric shapes + real images for popup
+      // Category icons and colors (matches seed legend: ◆ Towed, ■▲● Equipment, ★ Safety)
       const CATEGORY_CONFIG = {
-        "Towed Device": { shape: "diamond", color: "#9333ea", image: "Pictures/TowBar.png" },
-        "Equipment": { shape: "square", color: "#2563eb", image: null },
-        "Safety": { shape: "triangle", color: "#059669", image: null },
+        "Towed Device": { shape: "diamond", color: "#9333ea", image: "Pictures/TowBar.png" },   // ◆ Purple
+        "Equipment": { shape: "square", color: "#2563eb", image: null },                        // ■ Blue
+        "Safety": { shape: "star", color: "#ea580c", image: null },                             // ★ Orange
         "Container": { shape: "circle", color: "#ea580c", image: null },
         "Personnel": { shape: "star", color: "#dc2626", image: null },
         "Vehicle": { shape: "hexagon", color: "#7c3aed", image: null },
@@ -802,40 +842,6 @@
         `;
       }
 
-      // Track all marker positions to detect overlaps
-      const markerPositions = {};
-
-      function getSpreadOffset(lat, lng, markerId) {
-        const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
-        if (!markerPositions[key]) {
-          markerPositions[key] = [];
-        }
-        
-        // Check if this marker is already tracked
-        let index = markerPositions[key].indexOf(markerId);
-        if (index === -1) {
-          markerPositions[key].push(markerId);
-          index = markerPositions[key].length - 1;
-        }
-        
-        const count = markerPositions[key].length;
-        if (count <= 1) return { lat: 0, lng: 0 };
-        
-        // Spread markers in a circle pattern
-        const radius = 0.00015; // ~15 meters
-        const angle = (index / count) * 2 * Math.PI;
-        return {
-          lat: Math.sin(angle) * radius,
-          lng: Math.cos(angle) * radius
-        };
-      }
-
-      function clearMarkerPositions() {
-        Object.keys(markerPositions).forEach(key => {
-          markerPositions[key] = [];
-        });
-      }
-
       // ============================================================
       // BLE LOCATION LOGIC:
       // - BLE beacons are on STATIC equipment (tow bars, etc.)
@@ -872,58 +878,32 @@
       }
       
       // ===== MARKER SPREADING FOR OVERLAPPING ICONS =====
-      // Track markers at each position to spread them out
+      // Shared position group so trackers and beacons at same location spread in one circle (no stacking)
       const positionGroups = {};
-      const SPREAD_DISTANCE = 0.00003; // ~3 meters spread radius (minimal for testing)
+      const SPREAD_DISTANCE = 0.00014; // ~15m radius so markers are readable and don't overlap
       
       function getSpreadOffset(lat, lng, markerId) {
-        // Round to create position key (groups markers within ~10m)
         const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
-        
-        if (!positionGroups[key]) {
-          positionGroups[key] = [];
-        }
-        
-        // Check if this marker is already tracked
+        if (!positionGroups[key]) positionGroups[key] = [];
         let idx = positionGroups[key].indexOf(markerId);
         if (idx === -1) {
           idx = positionGroups[key].length;
           positionGroups[key].push(markerId);
         }
-        
-        // No spread needed for single marker
         const count = positionGroups[key].length;
-        if (count <= 1) {
-          return { lat: 0, lng: 0 };
-        }
-        
-        // Spread markers in a circle
-        const angle = (idx * (360 / count)) * Math.PI / 180;
+        if (count <= 1) return { lat: 0, lng: 0 };
+        const angle = (idx / count) * 2 * Math.PI;
         return {
-          lat: SPREAD_DISTANCE * Math.cos(angle),
-          lng: SPREAD_DISTANCE * Math.sin(angle)
+          lat: SPREAD_DISTANCE * Math.sin(angle),
+          lng: SPREAD_DISTANCE * Math.cos(angle)
         };
       }
       
       function clearMarkerPositions() {
-        // Reset position groups for next update cycle
-        Object.keys(positionGroups).forEach(key => {
-          positionGroups[key] = [];
-        });
-      }
-      
-      // Stable spreading: calculate offset based on MAC hash (never changes)
-      function getStableSpreadOffset(mac, index, total) {
-        // Use MAC to generate a consistent angle for this beacon
-        const hash = mac.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-        const angle = ((hash % 360) + (index * (360 / Math.max(total, 1)))) * Math.PI / 180;
-        const spreadMeters = 3; // ~3 meters spread (minimal for testing)
-        const latOffset = (spreadMeters / 111111) * Math.cos(angle);
-        const lngOffset = (spreadMeters / 111111) * Math.sin(angle);
-        return { lat: latOffset, lng: lngOffset };
+        Object.keys(positionGroups).forEach(key => { positionGroups[key] = []; });
       }
 
-      // NEW: Use ONLY ble_positions from SQL - each beacon appears ONLY ONCE
+      // Use ONLY ble_positions from API; trackers + beacons at same location share one spread circle - each beacon appears ONLY ONCE
       // STATIC positions - only updated when paired > 60 seconds
       function updateBeaconMarkersFromSQL(blePositionsData, trackerRows) {
         const now = Date.now();
@@ -941,38 +921,17 @@
         // Only update content, not position (unless being towed)
         console.log(`[BLE] Received ${macs.length} beacons from API`);
         
-        // Group beacons by position (for spreading overlapping markers)
-        const positionGroups = {};
-        macs.forEach(mac => {
-          const pos = blePositionsData[mac];
-          const lat = Number(pos.lat);
-          const lng = Number(pos.lng);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-          const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
-          if (!positionGroups[key]) positionGroups[key] = [];
-          positionGroups[key].push(mac);
-        });
-        
-        // Update/create markers for each BLE in ble_positions
-        // Beacons with no position yet will be skipped (they need to be detected first)
-        // Beacons with position will NEVER be removed - they stay at last known location
+        // Update/create markers for each BLE in ble_positions (use shared getSpreadOffset so trackers + beacons spread together)
         Object.entries(blePositionsData).forEach(([mac, pos]) => {
           const baseLat = Number(pos.lat);
           const baseLng = Number(pos.lng);
           
-          // Skip beacons with no valid position (never been detected)
           if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng)) {
             console.log(`[BLE] Skipping ${mac} - no position yet`);
             return;
           }
           
-          // Find which group this beacon belongs to (for spreading)
-          const key = `${baseLat.toFixed(5)},${baseLng.toFixed(5)}`;
-          const group = positionGroups[key] || [mac];
-          const indexInGroup = group.indexOf(mac);
-          
-          // Apply STABLE spread offset (based on MAC, never changes)
-          const offset = getStableSpreadOffset(mac, indexInGroup, group.length);
+          const offset = getSpreadOffset(baseLat, baseLng, `beacon_${mac}`);
           const lat = baseLat + offset.lat;
           const lng = baseLng + offset.lng;
           
@@ -1259,7 +1218,10 @@
         .addTo(map);
       layersControl.addOverlay(debugLayer, "Debug");
       layersControl.addOverlay(legendLayer, "GSE Legend");
+      layersControl.addOverlay(xGpsLayer, "📍 X-GPS (Human tracker)");
       layersControl.addOverlay(beaconLayer, "🔵 Eyebecon Tags");
+      xGpsLayer.on("add", function () { showXGpsMarkers = true; syncXGpsCheckboxes(true); });
+      xGpsLayer.on("remove", function () { showXGpsMarkers = false; syncXGpsCheckboxes(false); });
 
       const markers = {};
       let fitted = false;
@@ -1815,55 +1777,76 @@
         return `<div class="gse-popup gse-style-${POPUP_STYLE}"><h4>${label}</h4>${sections}</div>`;
       }
 
+      // X-GPS = Human Agent tracker only (e.g. Golan-X-GPS). SKODA is a GSE asset – never hide it.
+      function isXGpsHumanAgent(row) {
+        const label = String(row.label || row.tracker_id || "").toLowerCase().trim();
+        if (/^skoda$/.test(label)) return false;
+        return /golan-x-gps|x-gps\b/.test(label);
+      }
+
       function updateMarkers(rows) {
         isRefreshing = true;
-        if (!map.hasLayer(layer)) {
-          layer.addTo(map);
-        }
+        if (!map.hasLayer(layer)) layer.addTo(map);
         const bounds = [];
         const seen = new Set();
+        const xgpsSeen = new Set();
+
         rows.forEach((row) => {
           const lat = Number(row.lat);
           const lng = Number(row.lng);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-            return;
-          }
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
           const label = row.label || row.tracker_id || "tracker";
           const shortMatch = String(label).match(/(\d{4})/);
           const shortLabel = shortMatch ? shortMatch[1] : label;
           const id = String(row.tracker_id || label);
+          const isXgps = isXGpsHumanAgent(row);
+
+          if (isXgps) {
+            if (!showXGpsMarkers) return;
+            xgpsSeen.add(id);
+            const iconPath = iconPathForRow(row);
+            const size = markerSizeForZoom(map.getZoom());
+            const distanceMetersValue = updateDistance(id, lat, lng);
+            const moving = isMoving(row) || distanceMetersValue > MOVE_DISTANCE_METERS;
+            const labelClass = statusClass(row, moving, distanceMetersValue);
+            const spreadOffset = getSpreadOffset(lat, lng, `tracker_${id}`);
+            const markerLat = lat + spreadOffset.lat;
+            const markerLng = lng + spreadOffset.lng;
+            let marker = markersXgps[id];
+            if (!marker) {
+              marker = L.marker([markerLat, markerLng], { icon: markerIcon(iconPath, size), iconPath })
+                .bindPopup(popupHtml(row));
+              updateTooltip(marker, shortLabel, labelClass);
+              marker.on("click", () => { marker.openPopup(); activePopupId = id; });
+              marker.on("popupclose", () => { if (!isRefreshing && activePopupId === id) activePopupId = null; });
+              markersXgps[id] = marker;
+              marker.addTo(xGpsLayer);
+            } else {
+              marker.setLatLng([markerLat, markerLng]);
+              marker.setIcon(markerIcon(iconPath, size));
+              marker.setPopupContent(popupHtml(row));
+              updateTooltip(marker, shortLabel, labelClass);
+            }
+            return;
+          }
+
+          seen.add(id);
           const iconPath = iconPathForRow(row);
           const size = markerSizeForZoom(map.getZoom());
           const distanceMetersValue = updateDistance(id, lat, lng);
           const moving = isMoving(row) || distanceMetersValue > MOVE_DISTANCE_METERS;
           const labelClass = statusClass(row, moving, distanceMetersValue);
-          
-          // Apply spread offset to prevent overlapping with beacons
           const spreadOffset = getSpreadOffset(lat, lng, `tracker_${id}`);
           const markerLat = lat + spreadOffset.lat;
           const markerLng = lng + spreadOffset.lng;
-          
           let marker = markers[id];
           if (!marker) {
-            marker = L.marker([markerLat, markerLng], {
-              icon: markerIcon(iconPath, size),
-              iconPath,
-            })
+            marker = L.marker([markerLat, markerLng], { icon: markerIcon(iconPath, size), iconPath })
               .bindPopup(popupHtml(row));
             updateTooltip(marker, shortLabel, labelClass);
             marker.off("click", marker._openPopup);
-            marker.on("click", () => {
-              marker.openPopup();
-              activePopupId = id;
-            });
-            marker.on("popupclose", () => {
-              if (isRefreshing) {
-                return;
-              }
-              if (activePopupId === id) {
-                activePopupId = null;
-              }
-            });
+            marker.on("click", () => { marker.openPopup(); activePopupId = id; });
+            marker.on("popupclose", () => { if (!isRefreshing && activePopupId === id) activePopupId = null; });
             markers[id] = marker;
             marker.addTo(layer);
           } else {
@@ -1874,35 +1857,33 @@
             if (activePopupId === id) {
               const popupEl = marker.getPopup()?.getElement();
               const contentEl = popupEl?.querySelector(".gse-popup");
-              if (contentEl) {
-                popupScrollTop = contentEl.scrollTop;
-              }
+              if (contentEl) popupScrollTop = contentEl.scrollTop;
             }
             marker.setPopupContent(popupHtml(row));
             if (popupScrollTop !== null) {
               setTimeout(() => {
                 const popupEl = marker.getPopup()?.getElement();
                 const contentEl = popupEl?.querySelector(".gse-popup");
-                if (contentEl) {
-                  contentEl.scrollTop = popupScrollTop;
-                }
+                if (contentEl) contentEl.scrollTop = popupScrollTop;
               }, 0);
             }
             updateTooltip(marker, shortLabel, labelClass);
           }
-          seen.add(id);
-          if (!String(label).toLowerCase().includes("skoda")) {
-            bounds.push([lat, lng]);
+          if (!String(label).toLowerCase().includes("skoda")) bounds.push([lat, lng]);
+        });
+
+        Object.keys(markersXgps).forEach((key) => {
+          if (!xgpsSeen.has(key)) {
+            xGpsLayer.removeLayer(markersXgps[key]);
+            delete markersXgps[key];
+            if (activePopupId === key) activePopupId = null;
           }
         });
         Object.keys(markers).forEach((key) => {
           if (!seen.has(key)) {
-            const marker = markers[key];
-            layer.removeLayer(marker);
+            layer.removeLayer(markers[key]);
             delete markers[key];
-            if (activePopupId === key) {
-              activePopupId = null;
-            }
+            if (activePopupId === key) activePopupId = null;
           }
         });
 
@@ -1936,7 +1917,8 @@
       // Save BLE position to database when pairing confirmed
       async function saveBlePosition(mac, data) {
         try {
-          const baseUrl = LIVE_API_URL.replace('/data', '');
+          const apiUrl = LIVE_API_URL || DATA_SOURCES.motorized_gse;
+          const baseUrl = apiUrl.replace('/data', '');
           await fetch(`${baseUrl}/ble/position`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1959,48 +1941,129 @@
         }
       }
       
+      function mergeBeaconsFromRows(combinedBle, rows) {
+        rows.forEach(row => {
+          if (!row.beacons || !Array.isArray(row.beacons)) return;
+          const lat = Number(row.lat);
+          const lng = Number(row.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+          row.beacons.forEach(beacon => {
+            const mac = (beacon.mac || "").toLowerCase();
+            if (!mac) return;
+            const existing = combinedBle[mac];
+            const hasStored = existing && Number.isFinite(Number(existing.lat)) && Number.isFinite(Number(existing.lng));
+            if (hasStored) return;
+            const known = KNOWN_BEACONS[mac] || KNOWN_BEACONS[mac.toUpperCase()] || {};
+            combinedBle[mac] = {
+              lat, lng,
+              name: known.name || beacon.name || `Beacon ${mac.slice(-4)}`,
+              category: known.category || beacon.category || "Uncategorized",
+              type: known.type || beacon.beaconType || "eye_beacon",
+              last_tracker_id: row.tracker_id,
+              last_tracker_label: row.label || String(row.tracker_id),
+              last_update: new Date().toISOString(),
+              is_paired: false,
+            };
+          });
+        });
+      }
+
+      let loadInProgress = false;
+      let hasLoadedOnce = false;
+      function setStatus(msg) {
+        const el = document.getElementById("mapStatus");
+        if (el) el.textContent = msg;
+      }
+
       async function loadData() {
+        if (loadInProgress) return;
+        loadInProgress = true;
+        if (!hasLoadedOnce) setStatus("Loading…");
         try {
-          // Clear position groups before processing new data
           Object.keys(positionGroups).forEach(key => delete positionGroups[key]);
-          
-          const response = await fetch(LIVE_API_URL);
-          if (!response.ok) {
-            throw new Error("fetch failed");
+          let payloadNavixy = null;
+          let payloadDirect = null;
+
+          if (currentDataSource === "both") {
+            const [res1, res2] = await Promise.allSettled([
+              fetch(DATA_SOURCES.motorized_gse).then(r => r.ok ? r.json() : Promise.reject(new Error("8767 failed"))),
+              fetch(DATA_SOURCES.direct).then(r => r.ok ? r.json() : Promise.reject(new Error("8768 failed")))
+            ]);
+            payloadNavixy = res1.status === "fulfilled" ? res1.value : null;
+            payloadDirect = res2.status === "fulfilled" ? res2.value : null;
+            lastRows = (payloadNavixy && payloadNavixy.rows) ? payloadNavixy.rows : [];
+            if (payloadNavixy && payloadNavixy.ble_positions && Object.keys(blePositions).length === 0) {
+              Object.entries(payloadNavixy.ble_positions).forEach(([mac, pos]) => {
+                blePositions[mac] = { lat: pos.lat, lng: pos.lng, lastTracker: pos.last_tracker_id, lastTrackerLabel: pos.last_tracker_label || "Unknown", lastUpdate: pos.last_update, isPaired: pos.is_paired };
+              });
+            }
+            const combinedBle = { ...DIRECT_BEACON_POSITIONS_FALLBACK };
+            if (payloadDirect && payloadDirect.ble_positions) Object.assign(combinedBle, payloadDirect.ble_positions);
+            if (payloadNavixy && payloadNavixy.ble_positions) Object.assign(combinedBle, payloadNavixy.ble_positions);
+            mergeBeaconsFromRows(combinedBle, lastRows);
+            updateMarkers(lastRows);
+            renderTable(lastRows);
+            updateBeaconMarkersFromSQL(combinedBle, lastRows);
+            setStatus(lastRows.length ? `Both: ${lastRows.length} trackers, ${Object.keys(combinedBle).length} beacons` : (payloadNavixy ? "Both: no trackers" : "Both: 8767 failed"));
+          } else if (currentDataSource === "direct") {
+            try {
+              const response = await fetch(DATA_SOURCES.direct);
+              payloadDirect = response.ok ? await response.json() : null;
+            } catch (e) { payloadDirect = null; }
+            lastRows = [];
+            const fromBroker = (payloadDirect && payloadDirect.ble_positions) ? payloadDirect.ble_positions : {};
+            const combinedBle = { ...DIRECT_BEACON_POSITIONS_FALLBACK };
+            Object.assign(combinedBle, fromBroker);
+            mergeBeaconsFromRows(combinedBle, (payloadDirect && payloadDirect.rows) ? payloadDirect.rows : []);
+            updateMarkers([]);
+            renderTable([]);
+            updateBeaconMarkersFromSQL(combinedBle, []);
+            setStatus(Object.keys(combinedBle).length ? `Direct: ${Object.keys(combinedBle).length} Eyebecons` : "Direct: no beacons (use fallback positions)");
+          } else {
+            setStatus("Loading Motorized GSE…");
+            const response = await fetch(DATA_SOURCES.motorized_gse);
+            if (!response.ok) throw new Error("fetch failed");
+            payloadNavixy = await response.json();
+            lastRows = payloadNavixy.rows || [];
+            if (payloadNavixy.ble_positions && Object.keys(blePositions).length === 0) {
+              Object.entries(payloadNavixy.ble_positions).forEach(([mac, pos]) => {
+                blePositions[mac] = { lat: pos.lat, lng: pos.lng, lastTracker: pos.last_tracker_id, lastTrackerLabel: pos.last_tracker_label || "Unknown", lastUpdate: pos.last_update, isPaired: pos.is_paired };
+              });
+            }
+            const combinedBle = { ...(payloadNavixy.ble_positions || {}) };
+            mergeBeaconsFromRows(combinedBle, lastRows);
+            updateMarkers(lastRows);
+            renderTable(lastRows);
+            updateBeaconMarkersFromSQL(combinedBle, lastRows);
+            setStatus(lastRows.length ? `Motorized GSE: ${lastRows.length} trackers` : "Motorized GSE: no trackers");
           }
-          const payload = await response.json();
-          lastRows = payload.rows || [];
-          
-          // Load stored BLE positions from database (first time only)
-          if (payload.ble_positions && Object.keys(blePositions).length === 0) {
-            console.log(`[DB] Loading ${Object.keys(payload.ble_positions).length} stored BLE positions`);
-            Object.entries(payload.ble_positions).forEach(([mac, pos]) => {
-              blePositions[mac] = {
-                lat: pos.lat,
-                lng: pos.lng,
-                lastTracker: pos.last_tracker_id,
-                lastTrackerLabel: pos.last_tracker_label || "Unknown",
-                lastUpdate: pos.last_update,
-                isPaired: pos.is_paired
-              };
-            });
-          }
-          
-          updateMarkers(lastRows);
-          renderTable(lastRows);
-          // Update beacon markers from SQL-backed ble_positions (each BLE appears ONLY ONCE)
-          updateBeaconMarkersFromSQL(payload.ble_positions || {}, lastRows);
+          hasLoadedOnce = true;
         } catch (error) {
           console.error("Load data error:", error);
-          const statusEl = document.getElementById("mapStatus");
-          if (statusEl) {
-            statusEl.textContent = "Failed to load live data.";
-          }
+          setStatus(currentDataSource === "direct" ? "Direct: broker 8768 down?" : currentDataSource === "both" ? "Both: check 8767 & 8768" : "Motorized GSE: 8767 down?");
+        } finally {
+          loadInProgress = false;
         }
       }
 
       loadData();
       setInterval(loadData, POLL_INTERVAL_MS);
+
+      function syncXGpsCheckboxes(checked) {
+        const opt = document.getElementById("toggleXGpsOptions");
+        const leg = document.getElementById("toggleXGps");
+        if (opt) opt.checked = !!checked;
+        if (leg) leg.checked = !!checked;
+      }
+      function setXGpsVisible(visible) {
+        showXGpsMarkers = !!visible;
+        if (showXGpsMarkers && !map.hasLayer(xGpsLayer)) map.addLayer(xGpsLayer);
+        if (!showXGpsMarkers && map.hasLayer(xGpsLayer)) map.removeLayer(xGpsLayer);
+        syncXGpsCheckboxes(showXGpsMarkers);
+        updateMarkers(lastRows);
+      }
+      document.getElementById("toggleXGpsOptions")?.addEventListener("change", function () { setXGpsVisible(this.checked); });
+      document.getElementById("toggleXGps")?.addEventListener("change", function () { setXGpsVisible(this.checked); });
 
       fetch("llbg_layers.geojson")
         .then((res) => res.json())
