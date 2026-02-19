@@ -530,28 +530,15 @@
     <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
     <script>
       // Data source configuration
-      const IS_LOCAL_HOST =
-        window.location.hostname === "localhost" ||
-        window.location.hostname === "127.0.0.1";
-
-      // When running locally on your PC, use direct localhost ports.
-      // When loaded from GitHub Pages (or any non-local host), use the public
-      // Cloudflare tunnel URL that forwards to your local broker.
-      const DATA_SOURCES = IS_LOCAL_HOST
-        ? {
-            // Local development (your machine)
-            navixy: "http://127.0.0.1:8767/data", // optional Navixy server.py
-            teltonika_direct: "http://127.0.0.1:8768/data", // local broker
-          }
-        : {
-            // Public access for customers (served from GitHub Pages)
-            // Cloudflare tunnel must be running and exposing the /data endpoint.
-            navixy: "https://berlin-findarticles-conditioning-webcams.trycloudflare.com/data",
-            teltonika_direct: "https://berlin-findarticles-conditioning-webcams.trycloudflare.com/data",
-          };
-
-      // Default data source: Direct broker (local or tunneled)
-      let currentDataSource = "teltonika_direct";
+      // For now we always point the UI to localhost ports.
+      // This works when you run the map from a browser on the same machine
+      // that is running the Navixy API (8767) or Teltonika broker (8768).
+      // Remote customer access will require a stable public URL / tunnel.
+      const DATA_SOURCES = {
+        navixy: "http://127.0.0.1:8767/data",  // Optional Navixy server.py
+        teltonika_direct: "http://127.0.0.1:8768/data",  // Local broker
+      };
+      let currentDataSource = "teltonika_direct"; // Use broker for BLE data
       let LIVE_API_URL = DATA_SOURCES[currentDataSource];
       
       const POPUP_STYLE = "outline"; // soft | outline | compact
