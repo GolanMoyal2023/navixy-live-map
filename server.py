@@ -2,18 +2,29 @@
 """
 Navixy Live Map - Data API Server
 Provides /data endpoint for the static map UI.
+Now with SQL Server integration for BLE position persistence.
 """
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
 import requests
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, request
+
+# Import database helper
+try:
+    import db_helper
+    DB_ENABLED = True
+    print("[DB] SQL Server integration enabled")
+except Exception as e:
+    DB_ENABLED = False
+    print(f"[DB] SQL Server integration disabled: {e}")
 
 API_BASE_URL = os.environ.get("NAVIXY_BASE_URL", "https://api.navixy.com/v2")
-API_HASH = os.environ.get("NAVIXY_API_HASH")  # required
+# API hash - use environment variable or fallback to default for development
+API_HASH = os.environ.get("NAVIXY_API_HASH") or "f038d4c96bfc683cdc52337824f7e5f0"
 
 POLL_TIMEOUT_SECONDS = int(os.environ.get("NAVIXY_TIMEOUT", "10"))
 
@@ -309,7 +320,82 @@ def static_files(filename: str) -> Any:
 
 @app.get("/health")
 def health() -> Any:
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "db_enabled": DB_ENABLED})
+
+
+@app.get("/ble/positions")
+def ble_positions() -> Any:
+    """Get all BLE positions from database"""
+    if not DB_ENABLED:
+        return jsonify({"success": False, "error": "Database not available", "positions": {}})
+    
+    try:
+        positions = db_helper.get_all_ble_positions()
+        return jsonify({"success": True, "positions": positions, "count": len(positions)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "positions": {}})
+
+
+@app.get("/ble/definitions")
+def ble_definitions() -> Any:
+    """Get all BLE definitions from database"""
+    if not DB_ENABLED:
+        return jsonify({"success": False, "error": "Database not available", "definitions": {}})
+    
+    try:
+        definitions = db_helper.get_ble_definitions()
+        return jsonify({"success": True, "definitions": definitions, "count": len(definitions)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "definitions": {}})
+
+
+@app.route("/ble/position", methods=["POST", "OPTIONS"])
+def update_ble_position() -> Any:
+    """Update BLE position (called by client when pairing confirmed)"""
+    if request.method == "OPTIONS":
+        return "", 200
+    
+    if not DB_ENABLED:
+        return jsonify({"success": False, "error": "Database not available"})
+    
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"success": False, "error": "No data provided"})
+    
+    mac = data.get("mac", "").lower()
+    if not mac:
+        return jsonify({"success": False, "error": "MAC address required"})
+    
+    try:
+        # Get old position for movement logging
+        old_pos = db_helper.get_ble_position(mac)
+        old_lat = old_pos["lat"] if old_pos else None
+        old_lng = old_pos["lng"] if old_pos else None
+        
+        pairing_start = None
+        if data.get("pairing_start"):
+            pairing_start = datetime.fromisoformat(data["pairing_start"])
+        
+        success = db_helper.update_ble_position(
+            mac=mac,
+            lat=float(data.get("lat", 0)),
+            lng=float(data.get("lng", 0)),
+            tracker_id=int(data.get("tracker_id", 0)),
+            tracker_label=data.get("tracker_label", ""),
+            is_paired=data.get("is_paired", False),
+            pairing_start=pairing_start,
+            pairing_duration_sec=int(data.get("pairing_duration_sec", 0)),
+            battery_percent=data.get("battery_percent"),
+            magnet_status=data.get("magnet_status"),
+            log_movement=True,
+            old_lat=old_lat,
+            old_lng=old_lng
+        )
+        
+        return jsonify({"success": success})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 
 @app.get("/data")
@@ -323,6 +409,14 @@ def data() -> Any:
             {"success": False, "error": trackers_resp.get("status", {}).get("description"), "rows": []}
         ), 502
 
+    # Load BLE definitions from database
+    ble_definitions = {}
+    if DB_ENABLED:
+        try:
+            ble_definitions = db_helper.get_ble_definitions()
+        except:
+            pass
+
     rows: List[Dict[str, Any]] = []
     for tracker in trackers_resp.get("list", []):
         tracker_id = tracker.get("id")
@@ -334,10 +428,52 @@ def data() -> Any:
         readings_resp = _api_call("tracker/readings/list", {"tracker_id": tracker_id})
         readings = readings_resp if readings_resp.get("success") else {}
         row = _build_row(tracker, state_resp.get("state", {}), readings)
+        
+        # Store tracker position in database
+        if DB_ENABLED and row.get("lat") and row.get("lng"):
+            try:
+                db_helper.update_tracker(
+                    tracker_id=tracker_id,
+                    label=row.get("label", ""),
+                    lat=float(row["lat"]),
+                    lng=float(row["lng"]),
+                    speed=row.get("speed"),
+                    battery_percent=row.get("battery_level")
+                )
+            except Exception as e:
+                print(f"[DB] Error saving tracker {tracker_id}: {e}")
+        
+        # Enrich beacon data with database info and store positions
+        for beacon in row.get("beacons", []):
+            mac = beacon.get("mac", "").lower()
+            if mac and mac in ble_definitions:
+                beacon.update({
+                    "name": ble_definitions[mac].get("name"),
+                    "category": ble_definitions[mac].get("category"),
+                    "beaconType": ble_definitions[mac].get("type"),
+                    "sn": ble_definitions[mac].get("sn"),
+                })
+            
+            # Note: BLE position storage is handled by the client-side 60-second pairing logic
+            # The server just provides the current detection data
+        
         rows.append(row)
         time.sleep(0.05)
 
-    return jsonify({"success": True, "rows": rows})
+    # Add stored BLE positions to response for persistence across page loads
+    stored_ble_positions = {}
+    if DB_ENABLED:
+        try:
+            stored_ble_positions = db_helper.get_all_ble_positions()
+        except:
+            pass
+
+    return jsonify({
+        "success": True, 
+        "rows": rows,
+        "ble_positions": stored_ble_positions,
+        "db_enabled": DB_ENABLED
+    })
 
 
 if __name__ == "__main__":
