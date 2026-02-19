@@ -1992,6 +1992,10 @@
         const el = document.getElementById("mapStatus");
         if (el) el.textContent = msg;
       }
+      function dataFetch(url) {
+        const opts = (url && url.indexOf("ngrok") !== -1) ? { headers: { "ngrok-skip-browser-warning": "true" } } : {};
+        return fetch(url, opts);
+      }
 
       async function loadData() {
         if (loadInProgress) return;
@@ -2004,8 +2008,8 @@
 
           if (currentDataSource === "both") {
             const [res1, res2] = await Promise.allSettled([
-              fetch(DATA_SOURCES.motorized_gse).then(r => r.ok ? r.json() : Promise.reject(new Error("8767 failed"))),
-              fetch(DATA_SOURCES.direct).then(r => r.ok ? r.json() : Promise.reject(new Error("8768 failed")))
+              dataFetch(DATA_SOURCES.motorized_gse).then(r => r.ok ? r.json() : Promise.reject(new Error("8767 failed"))),
+              dataFetch(DATA_SOURCES.direct).then(r => r.ok ? r.json() : Promise.reject(new Error("8768 failed")))
             ]);
             payloadNavixy = res1.status === "fulfilled" ? res1.value : null;
             payloadDirect = res2.status === "fulfilled" ? res2.value : null;
@@ -2025,7 +2029,7 @@
             setStatus(lastRows.length ? `Both: ${lastRows.length} trackers, ${Object.keys(combinedBle).length} beacons` : (payloadNavixy ? "Both: no trackers" : "Both: data server unavailable"));
           } else if (currentDataSource === "direct") {
             try {
-              const response = await fetch(DATA_SOURCES.direct);
+              const response = await dataFetch(DATA_SOURCES.direct);
               payloadDirect = response.ok ? await response.json() : null;
             } catch (e) { payloadDirect = null; }
             lastRows = [];
@@ -2039,7 +2043,7 @@
             setStatus(Object.keys(combinedBle).length ? `Direct: ${Object.keys(combinedBle).length} Eyebecons` : "Direct: no beacons (use fallback positions)");
           } else {
             setStatus("Loading Motorized GSE…");
-            const response = await fetch(DATA_SOURCES.motorized_gse);
+            const response = await dataFetch(DATA_SOURCES.motorized_gse);
             if (!response.ok) throw new Error("fetch failed");
             payloadNavixy = await response.json();
             lastRows = payloadNavixy.rows || [];
@@ -2064,8 +2068,21 @@
         }
       }
 
-      loadData();
-      setInterval(loadData, POLL_INTERVAL_MS);
+      function startDataPolling() {
+        loadData();
+        setInterval(loadData, POLL_INTERVAL_MS);
+      }
+      if (typeof location !== "undefined" && location.hostname && location.hostname.indexOf("github.io") !== -1) {
+        fetch("api-url.json").then(function(r){ return r.ok ? r.json() : {}; }).then(function(j){
+          if (j && j.dataUrl) {
+            window.__NAVIXY_DATA_SOURCES.motorized_gse = j.dataUrl;
+            window.__NAVIXY_DATA_SOURCES.direct = j.dataUrl;
+          }
+          startDataPolling();
+        }).catch(function(){ startDataPolling(); });
+      } else {
+        startDataPolling();
+      }
 
       function syncXGpsCheckboxes(checked) {
         const opt = document.getElementById("toggleXGpsOptions");
