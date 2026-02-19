@@ -103,7 +103,7 @@ Write-Host "Recovery: attempting restart..." -ForegroundColor Yellow
 Write-Log "Starting recovery"
 
 # 1) Restart Windows services if present
-$serviceNames = @("NavixyApi", "NavixyQuickTunnel", "NavixyDashboard", "NavixyUrlSync")
+$serviceNames = @("NavixyApi", "NavixyBroker", "NavixyTunnel", "NavixyQuickTunnel", "NavixyDashboard", "NavixyUrlSync")
 $anyService = $false
 foreach ($svc in $serviceNames) {
     $s = Get-Service -Name $svc -ErrorAction SilentlyContinue

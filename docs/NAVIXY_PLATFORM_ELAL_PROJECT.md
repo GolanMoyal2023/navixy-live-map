@@ -93,6 +93,15 @@ Schema is created by: `python setup_database.py` (and optionally scripts/create_
 | 8768 | Broker API | teltonika_broker.py – map source "Direct" |
 | 15027 | Teltonika TCP | Devices connect here |
 
+### Windows services (server + broker + tunnel from branch)
+Install scripts use **repo root from script path** so the same broker/server logic (branch) runs as service:
+- **NavixyApi** – `service\start_server.ps1` → server.py (8767)
+- **NavixyBroker** – `service\start_broker.ps1` → teltonika_broker.py (15027, 8768)
+- **NavixyTunnel** – `service\start_tunnel.ps1` → Cloudflare
+- **NavixyDashboard** – optional, `service\start_dashboard.ps1`
+
+See `service\install_services.ps1`, `service\install_services_with_dashboard.ps1`, `service\README_SERVICE.md`.
+
 ---
 
 ## 6. Version 001 – Drop Checklist

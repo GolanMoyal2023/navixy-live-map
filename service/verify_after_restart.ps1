@@ -20,7 +20,7 @@ Write-Host "━━━━━━━━━━━━━━━━━━━━━━�
 Write-Host "Test 1: Windows Services" -ForegroundColor Yellow
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkGray
 
-$services = @("NavixyApi", "NavixyQuickTunnel", "NavixyDashboard")
+$services = @("NavixyApi", "NavixyBroker", "NavixyTunnel", "NavixyQuickTunnel", "NavixyDashboard")
 foreach ($svc in $services) {
     $service = Get-Service -Name $svc -ErrorAction SilentlyContinue
     if ($service -and $service.Status -eq "Running") {
@@ -36,11 +36,11 @@ Write-Host ""
 
 # Test 2: Local API
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkGray
-Write-Host "Test 2: Local API (http://localhost:8765)" -ForegroundColor Yellow
+Write-Host "Test 2: Local API (http://localhost:8767)" -ForegroundColor Yellow
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkGray
 
 try {
-    $localApi = Invoke-WebRequest -Uri "http://localhost:8765/data" -UseBasicParsing -TimeoutSec 15
+    $localApi = Invoke-WebRequest -Uri "http://localhost:8767/data" -UseBasicParsing -TimeoutSec 15
     if ($localApi.StatusCode -eq 200) {
         $data = $localApi.Content | ConvertFrom-Json
         $trackerCount = $data.rows.Count
