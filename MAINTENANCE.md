@@ -203,7 +203,24 @@ Start-Process "http://127.0.0.1:8080/index.html"
 
 ---
 
-## 13. Deploy to GitHub Pages (for clients)
+## 13. Browsing from external / PC / mobile browsers
+
+The same link works on **any device** (external computer, your PC, phone):
+
+**URL:** https://golanmoyal2023.github.io/navixy-live-map/
+
+**What the map does:**
+- **Opened from this PC (localhost):** Uses `config.js` → `127.0.0.1:8767` and `:8768` for data.
+- **Opened from anywhere else (external PC, mobile, other network):** Loads **api-url.json** from the repo and uses its `dataUrl` (e.g. Ngrok). All data requests to Ngrok URLs send the **ngrok-skip-browser-warning** header so the API returns JSON (no interstitial page).
+
+**Requirements for external/PC/mobile to see data:**
+1. Backend running on your machine: `.\start_all.ps1` (8767, 8768).
+2. Tunnel running and URL pushed: `.\service\start_ngrok_tunnel.ps1 -Push` (updates api-url.json and pushes to GitHub).
+3. Wait 1–2 minutes after push; then open the link above and hard-refresh (Ctrl+Shift+R or pull-to-refresh on mobile).
+
+---
+
+## 14. Deploy to GitHub Pages (for clients)
 
 To publish the map so clients can use **https://golanmoyal2023.github.io/navixy-live-map/**:
 
@@ -224,9 +241,11 @@ For server/tunnel setup, see **SERVER_DEPLOYMENT_GUIDE.md** and **SETUP_GUIDE.md
 
 ---
 
-## 14. Local configuration and recovery (service setup)
+## 15. Local configuration and recovery (service setup)
 
 **Local config (already in use):** The map uses **config.js** with `NAVIXY_MAP_API_BASE = "http://127.0.0.1"` so the map always talks to this machine (ports 8767 and 8768). Optional Windows services (from `service\`) can run the API, tunnel, dashboard, and URL-sync; see `service\install_services_with_dashboard.ps1` and `service\start_url_sync.ps1` if you use tunnel + GitHub URL sync.
+
+**Tunnel (Ngrok – no Cloudflare wait):** We use **Ngrok** so the tunnel works without Cloudflare rate limits. Run `.\service\start_ngrok_tunnel.ps1` after `start_all.ps1`; it starts ngrok on port 8767, gets the public URL from the ngrok API (4040), and updates `.quick_tunnel_url.txt` and **api-url.json**. Use `.\service\start_ngrok_tunnel.ps1 -Push` to also push to GitHub so the map on the phone (GitHub Pages) uses the new URL. Optional: **NavixyUrlSync** (Cloudflare log watcher) can still update api-url.json if you use Cloudflare instead; manual fallback: `.\service\update_public_url_from_tunnel.ps1 -Push`.
 
 **Recovery script (maintenance / down / failure):**
 
