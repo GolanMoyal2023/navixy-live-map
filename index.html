@@ -530,11 +530,28 @@
     <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
     <script>
       // Data source configuration
-      const DATA_SOURCES = {
-        navixy: "http://127.0.0.1:8767/data",  // Using 8767 for DB-enabled server
-        teltonika_direct: "http://127.0.0.1:8768/data",
-      };
-      let currentDataSource = "teltonika_direct"; // Use broker for BLE data
+      const IS_LOCAL_HOST =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1";
+
+      // When running locally on your PC, use direct localhost ports.
+      // When loaded from GitHub Pages (or any non-local host), use the public
+      // Cloudflare tunnel URL that forwards to your local broker.
+      const DATA_SOURCES = IS_LOCAL_HOST
+        ? {
+            // Local development (your machine)
+            navixy: "http://127.0.0.1:8767/data", // optional Navixy server.py
+            teltonika_direct: "http://127.0.0.1:8768/data", // local broker
+          }
+        : {
+            // Public access for customers (served from GitHub Pages)
+            // Cloudflare tunnel must be running and exposing the /data endpoint.
+            navixy: "https://berlin-findarticles-conditioning-webcams.trycloudflare.com/data",
+            teltonika_direct: "https://berlin-findarticles-conditioning-webcams.trycloudflare.com/data",
+          };
+
+      // Default data source: Direct broker (local or tunneled)
+      let currentDataSource = "teltonika_direct";
       let LIVE_API_URL = DATA_SOURCES[currentDataSource];
       
       const POPUP_STYLE = "outline"; // soft | outline | compact
