@@ -75,6 +75,8 @@ Or manually: `python -m http.server 8080` then open **http://127.0.0.1:8080/inde
 | [BUSINESS_LOGIC.md](BUSINESS_LOGIC.md) | 60-second pairing logic |
 | [SETUP_GUIDE.md](SETUP_GUIDE.md) | Installation steps |
 | [TELTONIKA_CONFIG.md](TELTONIKA_CONFIG.md) | Device configuration |
+| [docs/EYEBECON_BRANCH_SYNC.md](docs/EYEBECON_BRANCH_SYNC.md) | Eyebecon-as-asset branch vs main: single source, no duplication |
+| [docs/NAVIXY_PLATFORM_ELAL_PROJECT.md](docs/NAVIXY_PLATFORM_ELAL_PROJECT.md) | **Combined system doc** – all MDs, data flow, DB schema, v001 checklist |
 
 ## 🏷️ BLE Asset Categories
 

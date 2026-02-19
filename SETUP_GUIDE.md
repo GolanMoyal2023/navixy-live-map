@@ -13,8 +13,8 @@
 ### 1. Clone Repository
 
 ```powershell
-cd D:\New_Recovery\2Plus
-git clone https://github.com/MoyalsAI/2Plus.git
+cd D:\2Plus\Services
+git clone <your-repo-url> navixy-live-map
 cd navixy-live-map
 ```
 
@@ -47,7 +47,7 @@ Expected output:
 
 ```powershell
 # Terminal 1: HTTP Server (serves map)
-cd D:\New_Recovery\2Plus\navixy-live-map
+cd D:\2Plus\Services\navixy-live-map
 python -m http.server 8080
 
 # Terminal 2: Navixy API Server

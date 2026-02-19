@@ -1,9 +1,11 @@
 # URL Sync Service
 # Monitors tunnel logs and automatically syncs URL changes to GitHub
 # Runs as a Windows service - NO human intervention needed
+# Tunnel: NavixyQuickTunnel writes URL to quick_tunnel_stderr.log; this service updates api-url.json and pushes.
 
 $ErrorActionPreference = "Continue"
-$root = "D:\New_Recovery\2Plus\navixy-live-map"
+$root = if ($PSScriptRoot) { (Resolve-Path (Join-Path $PSScriptRoot "..")).Path } else { (Get-Location).Path }
+$root = $root.TrimEnd("\")
 
 # Setup logging
 $logDir = "$root\service\logs"
@@ -17,11 +19,11 @@ function Write-Log {
 }
 
 Write-Log "=========================================="
-Write-Log "URL Sync Service Started"
+Write-Log "URL Sync Service Started (root: $root)"
 Write-Log "=========================================="
 
 $urlFile = "$root\.quick_tunnel_url.txt"
-$indexFile = "$root\index.html"
+$apiUrlFile = "$root\api-url.json"
 $stderrLog = "$root\service\logs\quick_tunnel_stderr.log"
 $lastSyncedUrl = ""
 
@@ -52,32 +54,25 @@ function Sync-UrlToGitHub {
     Write-Log "Syncing URL to GitHub: $NewUrl"
     
     try {
-        # Update .quick_tunnel_url.txt
+        # Update .quick_tunnel_url.txt (used by dashboard and local refs)
         "$NewUrl/data" | Out-File -FilePath $urlFile -Encoding UTF8 -NoNewline
         Write-Log "Updated .quick_tunnel_url.txt"
         
-        # Update index.html
-        $indexContent = Get-Content $indexFile -Raw
-        $pattern = 'const LIVE_API_URL = "https://[^"]+/data"'
-        $replacement = "const LIVE_API_URL = `"$NewUrl/data`""
-        $newContent = $indexContent -replace $pattern, $replacement
-        $newContent | Set-Content $indexFile -NoNewline
-        Write-Log "Updated index.html"
+        # Update api-url.json (map on GitHub Pages reads this for mobile/external)
+        $dataUrl = "$NewUrl/data"
+        $json = @{ dataUrl = $dataUrl } | ConvertTo-Json -Compress
+        Set-Content -Path $apiUrlFile -Value $json -Encoding UTF8 -NoNewline
+        Write-Log "Updated api-url.json"
         
-        # Push to GitHub
         Set-Location $root
-        
-        # Configure git for service context (SYSTEM account needs safe.directory AND identity)
-        $env:GIT_REDIRECT_STDERR = '2>&1'
+        $rootEscaped = $root -replace '\\', '/'
         git config --global --add safe.directory $root 2>&1 | Out-Null
-        git config --global --add safe.directory "D:/New_Recovery/2Plus/navixy-live-map" 2>&1 | Out-Null
-        # Set git identity for SYSTEM account (required for commits)
-        Set-Location $root
+        git config --global --add safe.directory $rootEscaped 2>&1 | Out-Null
         git config user.email "navixy-service@localhost" 2>&1 | Out-Null
         git config user.name "Navixy URL Sync Service" 2>&1 | Out-Null
         Write-Log "Git configured (safe.directory + identity)"
         
-        git add index.html 2>&1 | Out-Null
+        git add api-url.json 2>&1 | Out-Null
         $commitResult = git commit -m "Auto-sync tunnel URL (service): $NewUrl" 2>&1
         Write-Log "Git commit: $commitResult"
         

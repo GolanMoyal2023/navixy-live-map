@@ -26,13 +26,13 @@ if (Test-Path $configFile) {
 }
 
 Write-Host "Repository: $repoPath" -ForegroundColor Cyan
-Write-Host "Files: index.html, config.js, llbg_layers.geojson, Pictures/" -ForegroundColor Cyan
+Write-Host "Files: index.html, config.js, api-url.json, llbg_layers.geojson, Pictures/" -ForegroundColor Cyan
 Write-Host ""
 
 Push-Location $repoPath
 
 try {
-    & git add index.html, config.js, llbg_layers.geojson 2>$null
+    & git add index.html, config.js, api-url.json, llbg_layers.geojson 2>$null
     if (Test-Path (Join-Path $repoPath "Pictures")) {
         & git add Pictures/ 2>$null
     }

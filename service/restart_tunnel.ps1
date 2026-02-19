@@ -52,7 +52,7 @@ Start-Sleep -Seconds 5
 Write-Host ""
 Write-Host "Recent tunnel logs:" -ForegroundColor Cyan
 Write-Host "----------------------------------------" -ForegroundColor Gray
-Get-Content "D:\New_Recovery\2Plus\navixy-live-map\service\logs\navixy_tunnel.log" -Tail 20 -ErrorAction SilentlyContinue
+Get-Content (Join-Path $PSScriptRoot "logs\navixy_tunnel.log") -Tail 20 -ErrorAction SilentlyContinue
 Write-Host "----------------------------------------" -ForegroundColor Gray
 
 # Check if cloudflared process is running

@@ -641,7 +641,7 @@ odbcad32.exe  # Check "Drivers" tab
 ## 📞 Support
 
 - **GitHub:** https://github.com/GolanMoyal2023/navixy-live-map
-- **Branch:** `Eyebecon-As-an-Asset`
+- **Branch:** `main` (contains all from `Eyebecon-As-an-Asset`; see [docs/EYEBECON_BRANCH_SYNC.md](docs/EYEBECON_BRANCH_SYNC.md))
 - **Documentation:** See `ARCHITECTURE.md`, `BUSINESS_LOGIC.md`, `TELTONIKA_CONFIG.md`
 
 ---

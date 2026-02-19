@@ -15,19 +15,32 @@ import struct
 import threading
 import time
 import json
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
 from flask import Flask, jsonify
 import logging
 
-# Configure logging
+# Configure logging: console + broker activity log file
+_LOG_DIR = os.path.dirname(os.path.abspath(__file__))
+_LOG_FILE = os.path.join(_LOG_DIR, "broker_activity.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    force=True,
 )
 logger = logging.getLogger(__name__)
+# File handler for broker activity (append)
+try:
+    _file_handler = logging.FileHandler(_LOG_FILE, encoding="utf-8")
+    _file_handler.setLevel(logging.INFO)
+    _file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+    logger.addHandler(_file_handler)
+    logger.info(f"[BROKER] Log file: {_LOG_FILE}")
+except Exception as e:
+    logger.warning(f"[BROKER] Could not create log file {_LOG_FILE}: {e}")
 
 # Import database helper
 try:
@@ -595,6 +608,7 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                     }
                     ble_pairing[mac] = {"tracker_imei": imei, "start_time": now}
                     logger.info(f"BLE {mac} ({beacon_name}): FIRST DETECTION (STOPPED) at ({tracker_lat:.6f}, {tracker_lng:.6f})")
+                    logger.info(f"[BLE_STORE] mac={mac} battery={beacon.get('battery')} last_update={now.isoformat()} tracker={imei}")
                 else:
                     # Tracker is moving - DON'T set position yet, just track that we saw it
                     ble_positions[mac] = {
@@ -612,6 +626,7 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                     }
                     ble_pairing[mac] = {"tracker_imei": imei, "start_time": now}
                     logger.info(f"BLE {mac} ({beacon_name}): DETECTED WHILE MOVING ({tracker_speed:.1f} km/h) - waiting for stop")
+                    logger.info(f"[BLE_STORE] mac={mac} battery={beacon.get('battery')} last_update={now.isoformat()} tracker={imei}")
                 
                 # Save to database
                 if DB_ENABLED:
@@ -649,6 +664,7 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
             ble_positions[mac]["battery"] = beacon.get("battery") or ble_positions[mac].get("battery")
             ble_positions[mac]["rssi"] = beacon.get("rssi") or ble_positions[mac].get("rssi")
             ble_positions[mac]["tracker_imei"] = imei
+            logger.info(f"[BLE_STORE] mac={mac} battery={ble_positions[mac].get('battery')} last_update={now.isoformat()} tracker={imei}")
             
             # ============================================================
             # CASE 1b: BEACON HAS NO POSITION YET (was detected while moving)
@@ -850,6 +866,9 @@ def handle_client(client_socket: socket.socket, address: tuple):
                         lng = record.get("lng", 0)
                         speed = record.get("speed", 0)
                         beacons = record.get("beacons", [])
+                        # Log what we caught from device (for broker activity log)
+                        for b in beacons:
+                            logger.info(f"[CATCH] IMEI={imei} beacon mac={b.get('mac')} battery={b.get('battery')} rssi={b.get('rssi')} lat={lat:.6f} lng={lng:.6f}")
                         
                         # Update tracker data
                         with data_lock:
@@ -1054,9 +1073,45 @@ def data():
             except Exception as e:
                 logger.warning(f"[DB] Could not fetch positions: {e}")
         
-        # Log what we're returning
+        # Enrich from vw_BLE_Diagnostics when battery or last_update are missing (e.g. no live broker data yet)
+        if DB_ENABLED:
+            try:
+                diag = db_helper.get_all_ble_from_diagnostics_view()
+                for mac, d in diag.items():
+                    if mac not in all_ble:
+                        ble_info = ble_definitions.get(mac, {})
+                        all_ble[mac] = {
+                            "lat": d.get("lat"),
+                            "lng": d.get("lng"),
+                            "last_tracker_id": d.get("last_tracker_id"),
+                            "last_tracker_label": d.get("last_tracker_label"),
+                            "last_update": d.get("last_update"),
+                            "is_paired": False,
+                            "pairing_duration": 0,
+                            "battery": d.get("battery_percent"),
+                            "rssi": None,
+                            "name": ble_info.get("name", d.get("name", mac[:8])),
+                            "category": ble_info.get("category", d.get("category", "Unknown")),
+                            "type": ble_info.get("type", d.get("type", "eye_beacon")),
+                            "sn": ble_info.get("sn", ""),
+                        }
+                    else:
+                        b = all_ble[mac]
+                        if b.get("battery") is None and d.get("battery_percent") is not None:
+                            b["battery"] = d.get("battery_percent")
+                        if b.get("last_update") is None and d.get("last_update"):
+                            b["last_update"] = d.get("last_update")
+                        if (b.get("lat") is None or b.get("lng") is None) and d.get("lat") is not None and d.get("lng") is not None:
+                            b["lat"] = d.get("lat")
+                            b["lng"] = d.get("lng")
+            except Exception as e:
+                logger.debug(f"[DB] vw_BLE_Diagnostics enrich: {e}")
+        
+        # Log what we're returning (for broker activity log)
         ble_with_pos = sum(1 for b in all_ble.values() if b.get("lat") is not None)
-        logger.debug(f"Returning {len(all_ble)} BLEs ({ble_with_pos} with positions)")
+        logger.info(f"[DATA] /data requested: returning {len(all_ble)} BLEs ({ble_with_pos} with positions)")
+        for mac, b in all_ble.items():
+            logger.info(f"[DATA] BLE mac={mac} battery={b.get('battery')} last_update={b.get('last_update')} lat={b.get('lat')} lng={b.get('lng')} last_tracker_label={b.get('last_tracker_label')}")
         
         return jsonify({
             "success": True,

@@ -2,6 +2,8 @@
 # Run this script after computer restart to verify everything works
 
 $ErrorActionPreference = "Continue"
+$repoRoot = if ($PSScriptRoot) { (Resolve-Path (Join-Path $PSScriptRoot "..")).Path } else { (Get-Location).Path }
+$repoRoot = $repoRoot.TrimEnd("\")
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "🔄 Post-Restart Verification Test" -ForegroundColor Cyan
@@ -85,7 +87,7 @@ Write-Host "━━━━━━━━━━━━━━━━━━━━━━�
 Write-Host "Test 4: Cloudflare Tunnel URL" -ForegroundColor Yellow
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkGray
 
-$tunnelUrlFile = "D:\New_Recovery\2Plus\navixy-live-map\.quick_tunnel_url.txt"
+$tunnelUrlFile = Join-Path $repoRoot ".quick_tunnel_url.txt"
 if (Test-Path $tunnelUrlFile) {
     $tunnelUrl = [System.IO.File]::ReadAllText($tunnelUrlFile).Trim()
     Write-Host "  Tunnel URL: $tunnelUrl" -ForegroundColor Gray

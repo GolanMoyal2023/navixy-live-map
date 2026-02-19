@@ -101,6 +101,48 @@ def get_ble_position(mac: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_all_ble_from_diagnostics_view() -> Dict[str, Dict[str, Any]]:
+    """
+    Get aggregated BLE state per MAC from vw_BLE_Diagnostics (if it exists in 2Plus_AssetTracking).
+    View has one row per beacon: beacon_name, category, ble_type, last_seen, avg_battery, etc.
+    Use this to feed battery and "Last saw" to the map when broker has no live data.
+    Returns same shape as get_all_ble_positions (lat/lng will be None; broker merges with BLE_Positions).
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT mac, beacon_name, category, ble_type, last_seen, avg_battery
+            FROM [dbo].[vw_BLE_Diagnostics]
+        """)
+        positions = {}
+        for row in cursor.fetchall():
+            mac = (row[0] or "").lower().replace(":", "").replace("-", "")
+            if not mac:
+                continue
+            last_seen = row[4]
+            positions[mac] = {
+                "lat": None,
+                "lng": None,
+                "last_tracker_id": None,
+                "last_tracker_label": None,
+                "last_update": last_seen.isoformat() if last_seen else None,
+                "is_paired": False,
+                "pairing_start": None,
+                "pairing_duration_sec": 0,
+                "battery_percent": int(row[5]) if row[5] is not None else None,
+                "magnet_status": None,
+                "name": row[1],
+                "category": row[2],
+                "type": row[3] if row[3] else "eye_beacon",
+                "sn": "",
+            }
+        return positions
+    except Exception as e:
+        print(f"[DB] vw_BLE_Diagnostics not available: {e}")
+        return {}
+
+
 def get_all_ble_positions() -> Dict[str, Dict[str, Any]]:
     """Get all BLE positions from database"""
     try:

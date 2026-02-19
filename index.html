@@ -766,16 +766,28 @@
         });
       }
 
+      function formatLastSaw(isoOrDate) {
+        if (!isoOrDate) return "";
+        const s = String(isoOrDate);
+        if (s.indexOf("T") !== -1) return s.replace("T", " ").substring(0, 19);
+        return s.substring(0, 19);
+      }
+
       function beaconPopupHtml(beacon) {
         const typeInfo = BEACON_CATEGORIES[beacon.beaconType] || BEACON_CATEGORIES["default"];
         const catConfig = CATEGORY_CONFIG[beacon.category] || CATEGORY_CONFIG["Uncategorized"];
         
-        // Battery is in volts for Teltonika Eye Beacons (3.0V = 100%, 2.0V = 0%)
-        const batteryVolts = parseFloat(beacon.battery) || 0;
-        const hasBattery = batteryVolts > 0;
-        const batteryPercent = hasBattery ? Math.max(0, Math.min(100, ((batteryVolts - 2.0) / 1.0) * 100)) : 0;
+        // Battery: from broker (Teltonika) can be volts (2.0–3.0) or percent (0–100)
+        const rawBattery = beacon.battery != null && beacon.battery !== "" ? parseFloat(beacon.battery) : NaN;
+        const isVolts = Number.isFinite(rawBattery) && rawBattery >= 1.5 && rawBattery <= 4;
+        const batteryPercent = Number.isFinite(rawBattery)
+          ? (isVolts ? Math.max(0, Math.min(100, ((rawBattery - 2.0) / 1.0) * 100)) : Math.max(0, Math.min(100, rawBattery)))
+          : 0;
+        const hasBattery = Number.isFinite(rawBattery) && (isVolts ? rawBattery > 0 : rawBattery >= 0);
         const batteryColor = !hasBattery ? "#6b7280" : batteryPercent > 50 ? "#059669" : batteryPercent > 20 ? "#ea580c" : "#dc2626";
-        const batteryDisplay = hasBattery ? `${batteryVolts}V (${batteryPercent.toFixed(0)}%)` : "N/A (not reported by Navixy)";
+        const batteryDisplay = hasBattery
+          ? (isVolts ? `${rawBattery.toFixed(2)}V (${batteryPercent.toFixed(0)}%)` : `${batteryPercent.toFixed(0)}%`)
+          : "N/A (not reported)";
         
         // Magnet sensor status - show for all beacons that have data
         let magnetStatus = "";
@@ -847,7 +859,7 @@
             <div class="beacon-host" style="background:#f3f4f6;padding:6px 8px;border-radius:4px;margin-top:8px;">
               <div style="font-weight:600;margin-bottom:4px;">📍 BLE Position Info</div>
               <div>Last set by: <strong>${beacon.lastSeenByTracker || beacon.hostTrackerLabel}</strong></div>
-              ${beacon.lastSeenAt ? `<div>Position set: <strong>${beacon.lastSeenAt.replace('T', ' ').substring(0, 19)}</strong></div>` : ''}
+              ${beacon.lastSeenAt || beacon.lastUpdate ? `<div>Last saw: <strong>${formatLastSaw(beacon.lastSeenAt || beacon.lastUpdate)}</strong></div>` : ""}
               ${beacon.isPaired ? 
                 `<div style="color:#059669;font-weight:600;">🔗 PAIRED (${beacon.pairingDuration}s) - Following tracker</div>` : 
                 beacon.pairingDuration > 0 ?
@@ -977,6 +989,7 @@
             isPaired: pos.is_paired,
             pairingDuration: pos.pairing_duration || 0,
             lastUpdate: pos.last_update,
+            lastSeenAt: pos.last_update,
             hostTrackerId: pos.last_tracker_id,
             hostTrackerLabel: trackerLabel,
           };
@@ -1196,13 +1209,15 @@
         clearMarkerPositions();
       }
 
-      // Toggle beacon legend visibility with layer
-      beaconLayer.on("add", () => {
+      // Eyebecon checkbox in layer control: only show/hide the legend menu (not the beacon objects on map)
+      const beaconLegendOverlay = L.layerGroup();
+      beaconLegendOverlay.on("add", () => {
         document.getElementById("beaconLegend")?.classList.remove("hidden");
       });
-      beaconLayer.on("remove", () => {
+      beaconLegendOverlay.on("remove", () => {
         document.getElementById("beaconLegend")?.classList.add("hidden");
       });
+      beaconLegendOverlay.addTo(map);
 
       const osmStreets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
@@ -1237,7 +1252,7 @@
       layersControl.addOverlay(debugLayer, "Debug");
       layersControl.addOverlay(legendLayer, "GSE Legend");
       layersControl.addOverlay(xGpsLayer, "📍 X-GPS (Human tracker)");
-      layersControl.addOverlay(beaconLayer, "🔵 Eyebecon Tags");
+      layersControl.addOverlay(beaconLegendOverlay, "🔵 Eyebecon Tags");
       xGpsLayer.on("add", function () { showXGpsMarkers = true; syncXGpsCheckboxes(true); });
       xGpsLayer.on("remove", function () { showXGpsMarkers = false; syncXGpsCheckboxes(false); });
 
@@ -1972,7 +1987,7 @@
             const hasStored = existing && Number.isFinite(Number(existing.lat)) && Number.isFinite(Number(existing.lng));
             if (hasStored) return;
             const known = KNOWN_BEACONS[mac] || KNOWN_BEACONS[mac.toUpperCase()] || {};
-            combinedBle[mac] = {
+            const fromRow = {
               lat, lng,
               name: known.name || beacon.name || `Beacon ${mac.slice(-4)}`,
               category: known.category || beacon.category || "Uncategorized",
@@ -1982,6 +1997,12 @@
               last_update: new Date().toISOString(),
               is_paired: false,
             };
+            // Beacon data (battery, last_update, etc.) comes only from broker; keep broker fields when present
+            if (existing && (existing.battery != null || existing.last_update != null)) {
+              combinedBle[mac] = { ...fromRow, battery: existing.battery, last_update: existing.last_update || fromRow.last_update, last_tracker_id: existing.last_tracker_id ?? fromRow.last_tracker_id, last_tracker_label: existing.last_tracker_label || fromRow.last_tracker_label, is_paired: existing.is_paired, pairing_duration: existing.pairing_duration };
+            } else {
+              combinedBle[mac] = fromRow;
+            }
           });
         });
       }
@@ -2019,9 +2040,22 @@
                 blePositions[mac] = { lat: pos.lat, lng: pos.lng, lastTracker: pos.last_tracker_id, lastTrackerLabel: pos.last_tracker_label || "Unknown", lastUpdate: pos.last_update, isPaired: pos.is_paired };
               });
             }
+            // Beacon data (battery, last_update, last_tracker_*, etc.) comes ONLY from broker. Navixy supplies location only when broker has none.
             const combinedBle = { ...DIRECT_BEACON_POSITIONS_FALLBACK };
             if (payloadDirect && payloadDirect.ble_positions) Object.assign(combinedBle, payloadDirect.ble_positions);
-            if (payloadNavixy && payloadNavixy.ble_positions) Object.assign(combinedBle, payloadNavixy.ble_positions);
+            if (payloadNavixy && payloadNavixy.ble_positions) {
+              Object.entries(payloadNavixy.ble_positions).forEach(([mac, pos]) => {
+                const existing = combinedBle[mac];
+                if (!existing) {
+                  combinedBle[mac] = { ...pos };
+                } else {
+                  // Keep broker fields; only fill lat/lng from Navixy if broker has no position
+                  if ((existing.lat == null || existing.lng == null) && pos.lat != null && pos.lng != null) {
+                    combinedBle[mac] = { ...existing, lat: pos.lat, lng: pos.lng };
+                  }
+                }
+              });
+            }
             mergeBeaconsFromRows(combinedBle, lastRows);
             updateMarkers(lastRows);
             renderTable(lastRows);

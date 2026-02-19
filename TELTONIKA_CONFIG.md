@@ -241,7 +241,7 @@ In Teltonika Configurator **Beacons** tab:
 
 ```powershell
 # Watch broker terminal for beacon data
-Get-Content "c:\Users\GolanMoyal\.cursor\projects\d-New-Recovery-2Plus\terminals\34.txt" -Tail 30
+Get-Content "D:\2Plus\Services\navixy-live-map\broker_activity.log" -Tail 30
 ```
 
 **Expected Output (SUCCESS):**
@@ -265,8 +265,8 @@ Get-Content "c:\Users\GolanMoyal\.cursor\projects\d-New-Recovery-2Plus\terminals
 # PowerShell
 Invoke-RestMethod "http://127.0.0.1:8768/data" | ConvertTo-Json -Depth 5
 
-# Or Python
-cd D:\New_Recovery\2Plus\navixy-live-map
+# Or Python (from repo root)
+cd D:\2Plus\Services\navixy-live-map
 .\.venv\Scripts\python.exe -c "import requests; import json; r = requests.get('http://127.0.0.1:8768/data'); print(json.dumps(r.json(), indent=2))"
 ```
 

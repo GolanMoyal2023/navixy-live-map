@@ -1,0 +1,25 @@
+# Broker and tunnel runtime
+broker_activity.log
+tunnel_out.txt
+tunnel_err.txt
+.quick_tunnel_url.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv_old/
+*.egg-info/
+
+# IDE / OS
+.vscode/
+.idea/
+*.suo
+Thumbs.db
+
+# Logs (optional – uncomment if you don't want to track)
+# service/logs/*.log
+
+# Secrets (never commit)
+.env
+*.pfx

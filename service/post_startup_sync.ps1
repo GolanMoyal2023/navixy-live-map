@@ -3,7 +3,8 @@
 # This can be added to Windows Task Scheduler to run at logon
 
 $ErrorActionPreference = "Continue"
-$root = "D:\New_Recovery\2Plus\navixy-live-map"
+$root = if ($PSScriptRoot) { (Resolve-Path (Join-Path $PSScriptRoot "..")).Path } else { (Get-Location).Path }
+$root = $root.TrimEnd("\")
 
 # Setup logging
 $logDir = "$root\service\logs"
@@ -66,22 +67,16 @@ if ($newUrl) {
     if ($newUrl -ne $currentUrl) {
         Write-Log "URL changed! Syncing to GitHub..."
         
-        # Update .quick_tunnel_url.txt
         "$newUrl/data" | Out-File -FilePath $urlFile -Encoding UTF8 -NoNewline
         Write-Log "Updated .quick_tunnel_url.txt"
         
-        # Update index.html
-        $indexFile = "$root\index.html"
-        $indexContent = Get-Content $indexFile -Raw
-        $pattern = 'const LIVE_API_URL = "https://[^"]+/data"'
-        $replacement = "const LIVE_API_URL = `"$newUrl/data`""
-        $newContent = $indexContent -replace $pattern, $replacement
-        $newContent | Set-Content $indexFile -NoNewline
-        Write-Log "Updated index.html"
+        $apiUrlFile = "$root\api-url.json"
+        $json = @{ dataUrl = "$newUrl/data" } | ConvertTo-Json -Compress
+        Set-Content -Path $apiUrlFile -Value $json -Encoding UTF8 -NoNewline
+        Write-Log "Updated api-url.json"
         
-        # Push to GitHub
         Set-Location $root
-        git add index.html 2>&1 | Out-Null
+        git add api-url.json 2>&1 | Out-Null
         git commit -m "Auto-sync tunnel URL on startup: $newUrl" 2>&1 | Out-Null
         $pushResult = git push 2>&1
         Write-Log "Git push result: $pushResult"
