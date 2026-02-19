@@ -562,7 +562,7 @@
         var isGitHubPages = typeof location !== "undefined" && location.hostname && location.hostname.indexOf("github.io") !== -1;
         var base = (typeof window !== "undefined" && window.NAVIXY_MAP_API_BASE)
           ? String(window.NAVIXY_MAP_API_BASE).replace(/:8767\/?$|:8768\/?$|\/data\/?$/, "")
-          : (isGitHubPages ? "https://navixy-livemap.moyals.net" : "http://127.0.0.1");
+          : "http://127.0.0.1";
         window.__NAVIXY_API_BASE = base;
       })();
     </script>
@@ -2010,7 +2010,7 @@
             updateMarkers(lastRows);
             renderTable(lastRows);
             updateBeaconMarkersFromSQL(combinedBle, lastRows);
-            setStatus(lastRows.length ? `Both: ${lastRows.length} trackers, ${Object.keys(combinedBle).length} beacons` : (payloadNavixy ? "Both: no trackers" : "Both: 8767 failed"));
+            setStatus(lastRows.length ? `Both: ${lastRows.length} trackers, ${Object.keys(combinedBle).length} beacons` : (payloadNavixy ? "Both: no trackers" : "Both: data server unavailable"));
           } else if (currentDataSource === "direct") {
             try {
               const response = await fetch(DATA_SOURCES.direct);
@@ -2046,7 +2046,7 @@
           hasLoadedOnce = true;
         } catch (error) {
           console.error("Load data error:", error);
-          setStatus(currentDataSource === "direct" ? "Direct: broker 8768 down?" : currentDataSource === "both" ? "Both: check 8767 & 8768" : "Motorized GSE: 8767 down?");
+          setStatus(currentDataSource === "direct" ? "Direct: data server unavailable" : currentDataSource === "both" ? "Both: data server unavailable" : "Motorized GSE: data server unavailable");
         } finally {
           loadInProgress = false;
         }
