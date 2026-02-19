@@ -1,0 +1,10 @@
+// Copy to config.js for GitHub Pages / production.
+// Option A: One endpoint (e.g. tunnel to 8765) – use same URL for both:
+// window.NAVIXY_MAP_DATA_SOURCES = { motorized_gse: "https://your-host/data", direct: "https://your-host/data", both: null };
+// Option B: Two endpoints (ports or paths) – set API base, map will add :8767/data and :8768/data:
+// window.NAVIXY_MAP_API_BASE = "https://your-host";
+window.NAVIXY_MAP_DATA_SOURCES = {
+  motorized_gse: "https://navixy-livemap.moyals.net/data",
+  direct: "https://navixy-livemap.moyals.net/data",
+  both: null,
+};

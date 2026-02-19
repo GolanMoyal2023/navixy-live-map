@@ -40,24 +40,23 @@ Real-time tracking and visualization of airport ground support equipment (GSE):
 | `db_helper.py` | SQL Server helper |
 | `setup_database.py` | Database setup |
 
-## 🚀 Quick Start
+## 🚀 Quick Start (run locally)
 
+**Terminal 1 – broker (TCP 15027 + HTTP 8768):**
 ```powershell
-# 1. Setup
-cd D:\New_Recovery\2Plus\navixy-live-map
-.\.venv\Scripts\activate
-pip install flask requests pyodbc
-
-# 2. Database
-.\.venv\Scripts\python.exe setup_database.py
-
-# 3. Start servers
-python -m http.server 8080                    # Map UI
-.\.venv\Scripts\python.exe teltonika_broker.py  # Broker
-
-# 4. Open map
-start http://127.0.0.1:8080/index.html
+cd D:\2Plus\Services\navixy-live-map
+.\.venv\Scripts\python.exe teltonika_broker.py
 ```
+
+**Terminal 2 – test data + map:**
+```powershell
+cd D:\2Plus\Services\navixy-live-map
+.\.venv\Scripts\python.exe send_test_avl.py   # optional: inject 1 tracker + BLE
+.\run_local.ps1                                # starts map server, opens browser
+```
+Or manually: `python -m http.server 8080` then open **http://127.0.0.1:8080/index.html** and use **Data: Direct**.
+
+**One-time setup:** `pip install flask requests pyodbc` in the venv; run `setup_database.py` if using SQL Server.
 
 ## 🔌 Ports
 
