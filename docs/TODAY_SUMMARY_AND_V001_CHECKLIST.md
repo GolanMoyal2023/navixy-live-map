@@ -80,7 +80,16 @@
 - [x] Eyebecon branch documented; main is single source.
 - [x] Cloudflare tunnel: fix permissions script + one-step fix/restart + doc.
 - [x] All MDs combined in docs/NAVIXY_PLATFORM_ELAL_PROJECT.md.
-- [ ] Repo: commit all, push, sync; tag or backup for v001 (next step).
+- [x] Repo: commit all, push, sync; tag or backup for v001.
+
+---
+
+## Branch and Backup (Done)
+
+- **main:** Pushed to `origin/main` (commit v001 prep).
+- **backup-v001:** Branch created and pushed – same as main at v001 drop.
+- **Tag v0.0.1:** Created and pushed – `git tag -a v0.0.1 -m "Version 0.0.1 - ELAL Navixy Platform drop..."`.
+- **Eyebecon-As-an-Asset:** Remote branch preserved; all its logic is merged into main (see docs/EYEBECON_BRANCH_SYNC.md).
 
 ---
 
