@@ -556,14 +556,20 @@
     <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
     <!-- Optional: load config.js to set window.NAVIXY_MAP_API_BASE for production (GitHub Pages) -->
     <script src="config.js"></script>
-    <!-- For GitHub Pages: set API base in config.js (see config.js.example) -->
+    <!-- For GitHub Pages: set API base in config.js (see config.js.example). On github.io we never use localhost. -->
     <script>
-      var __API_BASE = (typeof window !== "undefined" && window.NAVIXY_MAP_API_BASE) ? String(window.NAVIXY_MAP_API_BASE).replace(/:8767\/?$|:8768\/?$|\/data\/?$/, "") : "http://127.0.0.1";
+      (function(){
+        var isGitHubPages = typeof location !== "undefined" && location.hostname && location.hostname.indexOf("github.io") !== -1;
+        var base = (typeof window !== "undefined" && window.NAVIXY_MAP_API_BASE)
+          ? String(window.NAVIXY_MAP_API_BASE).replace(/:8767\/?$|:8768\/?$|\/data\/?$/, "")
+          : (isGitHubPages ? "https://navixy-livemap.moyals.net" : "http://127.0.0.1");
+        window.__NAVIXY_API_BASE = base;
+      })();
     </script>
     <script>
       const DATA_SOURCES = (typeof window !== "undefined" && window.NAVIXY_MAP_DATA_SOURCES) ? window.NAVIXY_MAP_DATA_SOURCES : {
-        motorized_gse: __API_BASE + ":8767/data",
-        direct: __API_BASE + ":8768/data",
+        motorized_gse: window.__NAVIXY_API_BASE + ":8767/data",
+        direct: window.__NAVIXY_API_BASE + ":8768/data",
         both: null,
       };
       // Real beacon positions (dev station) – used for Direct when broker returns wrong/empty data
