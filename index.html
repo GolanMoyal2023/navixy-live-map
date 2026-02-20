@@ -508,6 +508,9 @@
         <span id="mapStatus">Loading...</span>
         <button id="clearPopup" type="button">Clear</button>
       </div>
+      <div id="brokerWarning" class="map-overlay broker-warning hidden" style="background:rgba(220,38,38,0.9);color:#fff;padding:8px 12px;font-weight:bold;top:50px;left:50%;transform:translateX(-50%);border-radius:6px;z-index:2000;">
+        No beacon data without broker. Run .\start_all.ps1
+      </div>
       <div id="debugOverlay" class="map-overlay debug hidden">
         <span id="mapDebug">debug</span>
       </div>
@@ -563,9 +566,10 @@
         var isLocal = host === "127.0.0.1" || host === "localhost";
         var base;
         if (isLocal) {
-          base = (window.NAVIXY_MAP_API_BASE) ? String(window.NAVIXY_MAP_API_BASE).replace(/:8767\/?$|:8768\/?$|\/data\/?$/, "") : "http://127.0.0.1";
+          base = (window.NAVIXY_MAP_API_BASE) ? String(window.NAVIXY_MAP_API_BASE).replace(/:8765\/?$|:8767\/?$|:8768\/?$|\/data\/?$/, "") : "http://127.0.0.1";
+          if (String(window.NAVIXY_MAP_API_BASE || "").indexOf("8765") !== -1) base = base.replace(/\/?$/, "") + ":8765";
         } else {
-          base = (window.NAVIXY_MAP_API_BASE_PUBLIC) ? String(window.NAVIXY_MAP_API_BASE_PUBLIC).replace(/:8767\/?$|:8768\/?$|\/data\/?$/, "") : (window.NAVIXY_MAP_API_BASE ? String(window.NAVIXY_MAP_API_BASE).replace(/:8767\/?$|:8768\/?$|\/data\/?$/, "") : "https://navixy-livemap.moyals.net");
+          base = (window.NAVIXY_MAP_API_BASE_PUBLIC) ? String(window.NAVIXY_MAP_API_BASE_PUBLIC).replace(/:8765\/?$|:8767\/?$|:8768\/?$|\/data\/?$/, "") : (window.NAVIXY_MAP_API_BASE ? String(window.NAVIXY_MAP_API_BASE).replace(/:8765\/?$|:8767\/?$|:8768\/?$|\/data\/?$/, "") : "");
         }
         window.__NAVIXY_API_BASE = base;
       })();
@@ -573,7 +577,7 @@
     <script>
       (function(){
         var base = window.__NAVIXY_API_BASE || "http://127.0.0.1";
-        var useSingleData = base.indexOf("https://") === 0 || base.indexOf("http://") === 0 && base.indexOf("127.0.0.1") === -1;
+        var useSingleData = base.indexOf("https://") === 0 || (base.indexOf("http://") === 0 && base.indexOf("127.0.0.1") === -1) || base.indexOf("8765") !== -1;
         if (window.NAVIXY_MAP_DATA_SOURCES) {
           window.__NAVIXY_DATA_SOURCES = window.NAVIXY_MAP_DATA_SOURCES;
         } else if (useSingleData) {
@@ -584,13 +588,14 @@
         }
       })();
       const DATA_SOURCES = window.__NAVIXY_DATA_SOURCES;
-      // Real beacon positions (dev station) – used for Direct when broker returns wrong/empty data
+      // Fallback when broker returns wrong/empty data – ALL AT HOME (near Skoda)
+      const HOME_LAT = 32.3107, HOME_LNG = 34.9314;
       const DIRECT_BEACON_POSITIONS_FALLBACK = {
-        "7cd9f407f95c": { lat: 32.3119616, lng: 34.9324433, name: "Eybe2plus1", category: "Towed Device", type: "eye_beacon", last_tracker_label: "Direct" },
-        "7cd9f4003536": { lat: 32.3094883, lng: 34.9303666, name: "Eybe2plus2", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
-        "7cd9f406427b": { lat: 32.308865, lng: 34.93079, name: "EyeBe3", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
-        "7cd9f407a2db": { lat: 32.3142616, lng: 34.9349766, name: "EyeBe4", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
-        "7cd9f4116ee7": { lat: 32.310117, lng: 34.932402, name: "Eysen2plus", category: "Safety", type: "eye_sensor", last_tracker_label: "Direct" },
+        "7cd9f407f95c": { lat: HOME_LAT, lng: HOME_LNG, name: "Eybe2plus1", category: "Towed Device", type: "eye_beacon", last_tracker_label: "Direct" },
+        "7cd9f4003536": { lat: HOME_LAT, lng: HOME_LNG, name: "Eybe2plus2", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
+        "7cd9f406427b": { lat: HOME_LAT, lng: HOME_LNG, name: "EyeBe3", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
+        "7cd9f407a2db": { lat: HOME_LAT, lng: HOME_LNG, name: "EyeBe4", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
+        "7cd9f4116ee7": { lat: HOME_LAT, lng: HOME_LNG, name: "Eysen2plus", category: "Safety", type: "eye_sensor", last_tracker_label: "Direct" },
       };
       let currentDataSource = "both";
       let LIVE_API_URL = DATA_SOURCES[currentDataSource];
@@ -617,6 +622,7 @@
         hasLoadedOnce = false;
         loadData();
       }
+
       const map = L.map("map").setView([32.004, 34.876], 13);
       const layer = L.layerGroup().addTo(map);
       const xGpsLayer = L.layerGroup().addTo(map); // X-GPS (Human tracker) – show/hide via Options or layer control
@@ -2009,9 +2015,18 @@
 
       let loadInProgress = false;
       let hasLoadedOnce = false;
-      function setStatus(msg) {
+      function setStatus(msg, brokerOffline) {
         const el = document.getElementById("mapStatus");
         if (el) el.textContent = msg;
+        const w = document.getElementById("brokerWarning");
+        if (w) {
+          if (brokerOffline) {
+            w.textContent = "Broker offline - no beacon data. Run .\\start_all.ps1";
+            w.classList.remove("hidden");
+          } else {
+            w.classList.add("hidden");
+          }
+        }
       }
       function dataFetch(url) {
         const opts = (url && url.indexOf("ngrok") !== -1) ? { headers: { "ngrok-skip-browser-warning": "true" } } : {};
@@ -2060,7 +2075,9 @@
             updateMarkers(lastRows);
             renderTable(lastRows);
             updateBeaconMarkersFromSQL(combinedBle, lastRows);
-            setStatus(lastRows.length ? `Both: ${lastRows.length} trackers, ${Object.keys(combinedBle).length} beacons` : (payloadNavixy ? "Both: no trackers" : "Both: data server unavailable"));
+            let msg = lastRows.length ? `Both: ${lastRows.length} trackers, ${Object.keys(combinedBle).length} beacons` : (payloadNavixy ? "Both: no trackers" : "Broker offline - run .\\start_all.ps1");
+            if (!payloadDirect) { msg = "Broker offline - run .\\start_all.ps1 to get beacon data"; setStatus(msg, true); }
+            else setStatus(msg, false);
           } else if (currentDataSource === "direct") {
             try {
               const response = await dataFetch(DATA_SOURCES.direct);
@@ -2074,7 +2091,9 @@
             updateMarkers([]);
             renderTable([]);
             updateBeaconMarkersFromSQL(combinedBle, []);
-            setStatus(Object.keys(combinedBle).length ? `Direct: ${Object.keys(combinedBle).length} Eyebecons` : "Direct: no beacons (use fallback positions)");
+            let msg = Object.keys(combinedBle).length ? `Direct: ${Object.keys(combinedBle).length} Eyebecons` : "Direct: no beacons";
+            if (!payloadDirect) { msg = "Broker offline - run .\\start_all.ps1 to get beacon data"; setStatus(msg, true); }
+            else setStatus(msg, false);
           } else {
             setStatus("Loading Motorized GSE…");
             const response = await dataFetch(DATA_SOURCES.motorized_gse);
@@ -2096,7 +2115,9 @@
           hasLoadedOnce = true;
         } catch (error) {
           console.error("Load data error:", error);
-          setStatus(currentDataSource === "direct" ? "Direct: data server unavailable" : currentDataSource === "both" ? "Both: data server unavailable" : "Motorized GSE: data server unavailable");
+          const brokerMsg = "Broker offline - run .\\start_all.ps1 to get beacon data";
+          if (currentDataSource === "direct" || currentDataSource === "both") setStatus(brokerMsg, true);
+          else setStatus("Motorized GSE: data server unavailable", false);
         } finally {
           loadInProgress = false;
         }
