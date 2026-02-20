@@ -2128,7 +2128,7 @@
         setInterval(loadData, POLL_INTERVAL_MS);
       }
       if (typeof location !== "undefined" && location.hostname && location.hostname.indexOf("github.io") !== -1) {
-        fetch("api-url.json").then(function(r){ return r.ok ? r.json() : {}; }).then(function(j){
+        fetch("api-url.json?t=" + Date.now()).then(function(r){ return r.ok ? r.json() : {}; }).then(function(j){
           if (j && j.dataUrl) {
             window.__NAVIXY_DATA_SOURCES.motorized_gse = j.dataUrl;
             window.__NAVIXY_DATA_SOURCES.direct = j.dataUrl;
