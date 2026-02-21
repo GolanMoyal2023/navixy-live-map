@@ -56,7 +56,7 @@ function Add-NgrokHttpTunnel($port, $name) {
              -ContentType "application/json" -Body $body -ErrorAction Stop
         return $r.public_url
     } catch {
-        # May already exist â€” fetch it
+        # May already exist - fetch it
         try {
             $r = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels/$name" -ErrorAction Stop
             return $r.public_url
@@ -82,16 +82,19 @@ function Push-ApiUrlJson($jsonContent) {
         if (-not $blobHash) { throw "blob creation failed" }
 
         # Rebuild the tree from origin/main, replacing api-url.json
-        $treeLines = git ls-tree "origin/main" | Where-Object { $_ -notmatch "\tapi-url\.json$" }
+        # Write to a temp file first - piping strings to git mktree has encoding issues on Windows
+        $treeLines = git ls-tree "origin/main" | Where-Object { $_ -notmatch "`tapi-url\.json$" }
         $newEntry   = "100644 blob $blobHash`tapi-url.json"
-        $treeInput  = (($treeLines + $newEntry) -join "`n") + "`n"
-        $newTree    = ($treeInput | git mktree).Trim()
+        $treeFile   = [IO.Path]::GetTempFileName()
+        [IO.File]::WriteAllLines($treeFile, ($treeLines + $newEntry), [Text.Encoding]::UTF8)
+        $newTree    = (Get-Content $treeFile | git mktree).Trim()
+        Remove-Item $treeFile -ErrorAction SilentlyContinue
         if (-not $newTree) { throw "mktree failed" }
 
         # Commit on top of origin/main
         $parent = (git rev-parse "origin/main").Trim()
         $msg    = "Auto-sync broker URL $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
-        $newCom = ($msg | git commit-tree $newTree -p $parent).Trim()
+        $newCom = (git commit-tree $newTree -p $parent -m $msg).Trim()
         if (-not $newCom) { throw "commit-tree failed" }
 
         # Push
@@ -129,7 +132,7 @@ if ($Restart) {
 }
 
 # ================================================================
-# STEP 1 â€” BROKER (port 8768, TCP 15027)
+# STEP 1 - BROKER (port 8768, TCP 15027)
 # ================================================================
 Write-Step "1/4" "Teltonika Broker  (HTTP :8768  TCP :15027)"
 
@@ -141,11 +144,11 @@ if (Test-PortListening 8768) {
     Start-Sleep -Seconds 5
 
     if (Test-PortListening 8768) { Write-OK "started on :8768" }
-    else { Write-Warn "port :8768 not yet listening â€” may still be starting" }
+    else { Write-Warn "port :8768 not yet listening - may still be starting" }
 }
 
 # ================================================================
-# STEP 2 â€” NAVIXY SERVER (port 8767)
+# STEP 2 - NAVIXY SERVER (port 8767)
 # ================================================================
 Write-Step "2/4" "Navixy Server     (HTTP :8767)"
 
@@ -157,11 +160,11 @@ if (Test-PortListening 8767) {
     Start-Sleep -Seconds 4
 
     if (Test-PortListening 8767) { Write-OK "started on :8767" }
-    else { Write-Warn "port :8767 not yet listening â€” may still be starting" }
+    else { Write-Warn "port :8767 not yet listening - may still be starting" }
 }
 
 # ================================================================
-# STEP 3 â€” NGROK HTTP TUNNEL (broker :8768)
+# STEP 3 - NGROK HTTP TUNNEL (broker :8768)
 # ================================================================
 Write-Step "3/4" "ngrok HTTP tunnel  (:8768 -> public HTTPS)"
 
@@ -194,12 +197,12 @@ if ($tunnels.Count -eq 0) {
 }
 
 # ================================================================
-# STEP 4 â€” UPDATE api-url.json AND PUSH TO GITHUB
+# STEP 4 - UPDATE api-url.json AND PUSH TO GITHUB
 # ================================================================
 Write-Step "4/4" "Sync api-url.json to GitHub Pages"
 
 if (-not $brokerUrl) {
-    Write-Warn "no broker URL â€” skipping api-url.json update"
+    Write-Warn "no broker URL - skipping api-url.json update"
 } else {
     $newDataUrl  = "$brokerUrl/data"
     $apiUrlFile  = "$Root\api-url.json"
