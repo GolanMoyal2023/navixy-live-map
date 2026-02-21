@@ -222,8 +222,9 @@ if (-not $brokerUrl) {
         $json = "{`"dataUrl`":`"$newDataUrl`"}"
         Write-Host "    new URL: $newDataUrl" -ForegroundColor Gray
 
-        # Also write locally (for reference)
-        Set-Content -Path $apiUrlFile -Value $json -Encoding UTF8 -NoNewline
+        # Write locally with NO BOM (Set-Content -Encoding UTF8 adds BOM in PS5 which breaks browser JSON.parse)
+        $noBomEnc = New-Object System.Text.UTF8Encoding($false)
+        [IO.File]::WriteAllText($apiUrlFile, $json, $noBomEnc)
 
         # Push to origin/main via git plumbing (no branch checkout needed)
         Push-ApiUrlJson $json | Out-Null
