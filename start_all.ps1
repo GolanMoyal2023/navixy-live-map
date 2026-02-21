@@ -82,19 +82,23 @@ function Push-ApiUrlJson($jsonContent) {
         if (-not $blobHash) { throw "blob creation failed" }
 
         # Rebuild the tree from origin/main, replacing api-url.json
-        # Write to a temp file first - piping strings to git mktree has encoding issues on Windows
-        $treeLines = git ls-tree "origin/main" | Where-Object { $_ -notmatch "`tapi-url\.json$" }
-        $newEntry   = "100644 blob $blobHash`tapi-url.json"
-        $treeFile   = [IO.Path]::GetTempFileName()
-        [IO.File]::WriteAllLines($treeFile, ($treeLines + $newEntry), [Text.Encoding]::UTF8)
-        $newTree    = (Get-Content $treeFile | git mktree).Trim()
+        # Use no-BOM UTF8 + cmd redirect to avoid CR corruption on Windows
+        $noBom     = New-Object System.Text.UTF8Encoding($false)
+        $treeLines = git ls-tree "origin/main" | Where-Object { $_ -notmatch "api-url\.json" }
+        $newEntry  = "100644 blob $blobHash`tapi-url.json"
+        $treeFile  = [IO.Path]::GetTempFileName()
+        [IO.File]::WriteAllText($treeFile, (($treeLines + $newEntry) -join "`n") + "`n", $noBom)
+        $newTree   = (cmd /c "git mktree < `"$treeFile`"").Trim()
         Remove-Item $treeFile -ErrorAction SilentlyContinue
         if (-not $newTree) { throw "mktree failed" }
 
         # Commit on top of origin/main
-        $parent = (git rev-parse "origin/main").Trim()
-        $msg    = "Auto-sync broker URL $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
-        $newCom = (git commit-tree $newTree -p $parent -m $msg).Trim()
+        $parent  = (git rev-parse "origin/main").Trim()
+        $msg     = "Auto-sync broker URL $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+        $msgFile = [IO.Path]::GetTempFileName()
+        [IO.File]::WriteAllText($msgFile, $msg, $noBom)
+        $newCom  = (cmd /c "git commit-tree $newTree -p $parent -F `"$msgFile`"").Trim()
+        Remove-Item $msgFile -ErrorAction SilentlyContinue
         if (-not $newCom) { throw "commit-tree failed" }
 
         # Push
