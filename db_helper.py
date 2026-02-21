@@ -297,6 +297,62 @@ def get_config(key: str, default: str = None) -> str:
         return default
 
 
+def log_ble_scan(
+    mac: str,
+    lat: float,
+    lng: float,
+    tracker_imei: str,
+    tracker_label: str,
+    rssi: int = None,
+    battery_percent: int = None,
+    distance_meters: float = None,
+    magnet_status: str = None,
+    is_known_beacon: bool = False,
+) -> bool:
+    """Log a single BLE scan event to the BLE_Scans history table"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO BLE_Scans
+            (mac, lat, lng, tracker_imei, tracker_label, rssi,
+             battery_percent, distance_meters, magnet_status,
+             is_known_beacon, scan_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+        """, mac.lower(), lat, lng, tracker_imei, tracker_label,
+            rssi, battery_percent, distance_meters, magnet_status,
+            1 if is_known_beacon else 0)
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"[DB ERROR] log_ble_scan: {e}")
+        return False
+
+
+def get_rutx11_scanners() -> dict:
+    """Load persisted RUTX11 scanner registrations from System_Config"""
+    import json as _json
+    scanners = {}
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT config_key, config_value FROM System_Config
+            WHERE config_key LIKE 'rutx11_scanner_%'
+        """)
+        for row in cursor.fetchall():
+            scanner_id = row[0][len("rutx11_scanner_"):]
+            try:
+                info = _json.loads(row[1])
+                scanners[scanner_id] = info
+            except Exception:
+                pass
+        return scanners
+    except Exception as e:
+        print(f"[DB ERROR] get_rutx11_scanners: {e}")
+        return {}
+
+
 def _calculate_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """Calculate distance between two points in meters using Haversine formula"""
     from math import radians, cos, sin, asin, sqrt

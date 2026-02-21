@@ -479,8 +479,9 @@
     </div>
     <div class="data-source-toggle">
       <span class="source-label">Data:</span>
-      <button class="source-btn active" data-source="navixy" onclick="switchDataSource('navixy')">Navixy</button>
-      <button class="source-btn" data-source="teltonika_direct" onclick="switchDataSource('teltonika_direct')">Direct</button>
+      <button class="source-btn" data-source="navixy" onclick="switchDataSource('navixy')">Navixy</button>
+      <button class="source-btn" data-source="teltonika_direct" onclick="switchDataSource('teltonika_direct')">Broker</button>
+      <button class="source-btn active" data-source="both" onclick="switchDataSource('both')">Both</button>
     </div>
     <div id="mapView" class="view-panel active">
       <div id="map"></div>
@@ -534,8 +535,8 @@
         navixy: "http://127.0.0.1:8767/data",  // Using 8767 for DB-enabled server
         teltonika_direct: "http://127.0.0.1:8768/data",
       };
-      let currentDataSource = "teltonika_direct"; // Use broker for BLE data
-      let LIVE_API_URL = DATA_SOURCES[currentDataSource];
+      let currentDataSource = "both"; // Combined: Navixy motorized + Broker beacons
+      let LIVE_API_URL = DATA_SOURCES.teltonika_direct; // Fallback for non-both mode
       
       const POPUP_STYLE = "outline"; // soft | outline | compact
       const POLL_INTERVAL_MS = 2000;
@@ -543,19 +544,21 @@
       // Function to switch data source
       function switchDataSource(source) {
         currentDataSource = source;
-        LIVE_API_URL = DATA_SOURCES[source];
+        LIVE_API_URL = DATA_SOURCES[source] || DATA_SOURCES.teltonika_direct;
         console.log(`Switched to ${source}: ${LIVE_API_URL}`);
-        
+
         // Update button states
         document.querySelectorAll('.source-btn').forEach(btn => {
           btn.classList.toggle('active', btn.dataset.source === source);
         });
-        
+
         // Clear existing markers and fetch new data
         layer.clearLayers();
         beaconLayer.clearLayers();
         Object.keys(beaconMarkers).forEach(k => delete beaconMarkers[k]);
-        fetchLive();
+        Object.keys(markers).forEach(k => delete markers[k]);
+        fitted = false;
+        loadData();
       }
       const map = L.map("map").setView([32.004, 34.876], 13);
       const layer = L.layerGroup().addTo(map);
@@ -583,14 +586,18 @@
       // Known Teltonika Eye Beacons/Sensors (from your inventory)
       // Map MAC addresses (as reported by Navixy) to beacon info
       const KNOWN_BEACONS = {
-        // Actual MACs from Navixy API (uppercase)
-        "7CD9F407F95C": { name: "Eybe2plus1", sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
-        "7CD9F4003536": { name: "Eybe2plus2", sn: "6204011168", type: "eye_beacon", category: "Equipment" },
-        "7CD9F4116EE7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
+        // All 5 Eye beacons/sensors (uppercase + lowercase for compatibility)
+        "7CD9F407F95C": { name: "Eybe2plus1",  sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
+        "7CD9F4003536": { name: "Eybe2plus2",  sn: "6204011168", type: "eye_beacon", category: "Equipment"    },
+        "7CD9F4116EE7": { name: "Eysen2plus",  sn: "6134010143", type: "eye_sensor", category: "Safety"       },
+        "7CD9F406427B": { name: "EyeBe3",       sn: "",           type: "eye_beacon", category: "Equipment"    },
+        "7CD9F407A2DB": { name: "EyeBe4",       sn: "",           type: "eye_beacon", category: "Equipment"    },
         // Lowercase versions
-        "7cd9f407f95c": { name: "Eybe2plus1", sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
-        "7cd9f4003536": { name: "Eybe2plus2", sn: "6204011168", type: "eye_beacon", category: "Equipment" },
-        "7cd9f4116ee7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
+        "7cd9f407f95c": { name: "Eybe2plus1",  sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
+        "7cd9f4003536": { name: "Eybe2plus2",  sn: "6204011168", type: "eye_beacon", category: "Equipment"    },
+        "7cd9f4116ee7": { name: "Eysen2plus",  sn: "6134010143", type: "eye_sensor", category: "Safety"       },
+        "7cd9f406427b": { name: "EyeBe3",       sn: "",           type: "eye_beacon", category: "Equipment"    },
+        "7cd9f407a2db": { name: "EyeBe4",       sn: "",           type: "eye_beacon", category: "Equipment"    },
       };
 
       // Category icons and colors - using geometric shapes + real images for popup
@@ -1959,33 +1966,88 @@
         try {
           // Clear position groups before processing new data
           Object.keys(positionGroups).forEach(key => delete positionGroups[key]);
-          
-          const response = await fetch(LIVE_API_URL);
-          if (!response.ok) {
-            throw new Error("fetch failed");
+
+          let allRows = [];
+          let blePosData = {};
+          let combinedStatus = null; // In 'both' mode, set and re-applied after updateMarkers
+
+          if (currentDataSource === 'both') {
+            // ── BOTH MODE: fetch Navixy (motorized) + Broker (beacons) in parallel ──
+            const [navixyResult, brokerResult] = await Promise.allSettled([
+              fetch(DATA_SOURCES.navixy).then(r => r.ok ? r.json() : null).catch(() => null),
+              fetch(DATA_SOURCES.teltonika_direct).then(r => r.ok ? r.json() : null).catch(() => null)
+            ]);
+
+            const navixyData = navixyResult.status === 'fulfilled' ? navixyResult.value : null;
+            const brokerData = brokerResult.status === 'fulfilled' ? brokerResult.value : null;
+
+            // Merge tracker rows — Navixy rows first (motorized GSE), then broker direct FMC
+            const seenKeys = new Set();
+            if (navixyData && navixyData.rows) {
+              navixyData.rows.forEach(row => {
+                seenKeys.add(row.imei || String(row.tracker_id));
+                allRows.push(row);
+              });
+            }
+            if (brokerData && brokerData.rows) {
+              brokerData.rows.forEach(row => {
+                const key = row.imei || String(row.tracker_id);
+                if (!seenKeys.has(key)) allRows.push(row);
+              });
+            }
+
+            // BLE positions: broker is authoritative (SQL-backed RUTX11 data)
+            blePosData = (brokerData && brokerData.ble_positions) || {};
+            // Fill any gaps with Navixy BLE data (FMC-detected beacons)
+            if (navixyData && navixyData.ble_positions) {
+              Object.entries(navixyData.ble_positions).forEach(([mac, pos]) => {
+                if (!blePosData[mac] || !blePosData[mac].lat) blePosData[mac] = pos;
+              });
+            }
+
+            // Status line — saved and re-applied after updateMarkers() overwrites it
+            const navixyOk    = navixyData ? `Navixy: ${(navixyData.rows || []).length} GSE` : 'Navixy: OFFLINE';
+            const beaconCount = brokerData
+              ? (brokerData.ble_with_position || Object.values(blePosData).filter(b => b && b.lat).length)
+              : 0;
+            const brokerOk    = brokerData ? `Beacons: ${beaconCount}` : 'Broker: OFFLINE';
+            combinedStatus    = `${navixyOk} | ${brokerOk}`;
+
+          } else {
+            // ── SINGLE SOURCE MODE ──
+            const response = await fetch(LIVE_API_URL);
+            if (!response.ok) throw new Error("fetch failed");
+            const payload = await response.json();
+            allRows   = payload.rows || [];
+            blePosData = payload.ble_positions || {};
+
+            // Load stored BLE positions from database (first time only)
+            if (payload.ble_positions && Object.keys(blePositions).length === 0) {
+              console.log(`[DB] Loading ${Object.keys(payload.ble_positions).length} stored BLE positions`);
+              Object.entries(payload.ble_positions).forEach(([mac, pos]) => {
+                blePositions[mac] = {
+                  lat: pos.lat,
+                  lng: pos.lng,
+                  lastTracker: pos.last_tracker_id,
+                  lastTrackerLabel: pos.last_tracker_label || "Unknown",
+                  lastUpdate: pos.last_update,
+                  isPaired: pos.is_paired
+                };
+              });
+            }
           }
-          const payload = await response.json();
-          lastRows = payload.rows || [];
-          
-          // Load stored BLE positions from database (first time only)
-          if (payload.ble_positions && Object.keys(blePositions).length === 0) {
-            console.log(`[DB] Loading ${Object.keys(payload.ble_positions).length} stored BLE positions`);
-            Object.entries(payload.ble_positions).forEach(([mac, pos]) => {
-              blePositions[mac] = {
-                lat: pos.lat,
-                lng: pos.lng,
-                lastTracker: pos.last_tracker_id,
-                lastTrackerLabel: pos.last_tracker_label || "Unknown",
-                lastUpdate: pos.last_update,
-                isPaired: pos.is_paired
-              };
-            });
-          }
-          
+
+          lastRows = allRows;
           updateMarkers(lastRows);
           renderTable(lastRows);
           // Update beacon markers from SQL-backed ble_positions (each BLE appears ONLY ONCE)
-          updateBeaconMarkersFromSQL(payload.ble_positions || {}, lastRows);
+          updateBeaconMarkersFromSQL(blePosData, lastRows);
+          // In 'both' mode override the status set by updateMarkers with source-level info
+          if (combinedStatus) {
+            const statusEl = document.getElementById("mapStatus");
+            if (statusEl) statusEl.textContent = combinedStatus;
+          }
+
         } catch (error) {
           console.error("Load data error:", error);
           const statusEl = document.getElementById("mapStatus");

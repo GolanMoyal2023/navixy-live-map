@@ -643,12 +643,14 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                     last_seen = now
             gap_seconds = (now - last_seen).total_seconds() if last_seen else 0
             
-            # Always update metadata
+            # Always update metadata (runs every detection, regardless of distance)
             ble_positions[mac]["last_seen"] = now
             ble_positions[mac]["last_update"] = now.isoformat()
             ble_positions[mac]["battery"] = beacon.get("battery") or ble_positions[mac].get("battery")
             ble_positions[mac]["rssi"] = beacon.get("rssi") or ble_positions[mac].get("rssi")
             ble_positions[mac]["tracker_imei"] = imei
+            if beacon.get("magnet_status") is not None:
+                ble_positions[mac]["magnet_status"] = beacon.get("magnet_status")
             
             # ============================================================
             # CASE 1b: BEACON HAS NO POSITION YET (was detected while moving)
@@ -675,26 +677,47 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                 continue
             
             # ============================================================
-            # CASE 2: GPS DRIFT FILTER - Ignore small movements (<25m)
+            # PAIRING STATUS - Always update regardless of distance
+            # Runs BEFORE the drift filter so map status is always current
+            # ============================================================
+            current_pairing = ble_pairing.get(mac)
+
+            if current_pairing is None or current_pairing.get("tracker_imei") != imei:
+                # New or different tracker - reset pairing timer
+                ble_pairing[mac] = {"tracker_imei": imei, "start_time": now}
+                logger.info(f"BLE {mac} ({beacon_name}): New tracker {imei}, starting 60s pairing timer")
+                ble_positions[mac]["is_paired"] = False
+                ble_positions[mac]["pairing_duration"] = 0
+                pairing_duration = 0
+                is_paired = False
+            else:
+                # Same tracker - accumulate pairing duration
+                pairing_duration = (now - ble_pairing[mac]["start_time"]).total_seconds()
+                ble_positions[mac]["pairing_duration"] = int(pairing_duration)
+                is_paired = pairing_duration >= PAIRING_THRESHOLD_SEC
+                ble_positions[mac]["is_paired"] = is_paired
+                if not is_paired:
+                    logger.debug(f"BLE {mac}: Pairing {pairing_duration:.0f}s / {PAIRING_THRESHOLD_SEC}s")
+
+            # ============================================================
+            # CASE 2: GPS DRIFT FILTER - Skip position update only
+            # Pairing status already updated above - map always stays current
             # ============================================================
             if distance_m < GPS_DRIFT_THRESHOLD_M:
-                # Small movement = GPS drift, ignore position change
-                logger.debug(f"BLE {mac}: Ignoring {distance_m:.1f}m movement (GPS drift < {GPS_DRIFT_THRESHOLD_M}m)")
+                logger.debug(f"BLE {mac}: No movement ({distance_m:.1f}m), paired={is_paired}, duration={int(pairing_duration)}s")
                 continue
-            
+
             # ============================================================
             # CASE 3: GAP + SIGNIFICANT MOVE - Update immediately
             # ============================================================
             if gap_seconds > GAP_THRESHOLD_SEC and distance_m > SIGNIFICANT_MOVE_M:
-                # Beacon was not seen for >5 min and moved >50m = new placement
-                logger.info(f"BLE {mac} ({beacon_name}): GAP DETECTED ({gap_seconds:.0f}s) + MOVED {distance_m:.0f}m -> UPDATING POSITION")
-                
+                logger.info(f"BLE {mac} ({beacon_name}): GAP ({gap_seconds:.0f}s) + MOVED {distance_m:.0f}m -> UPDATING")
                 ble_positions[mac]["lat"] = tracker_lat
                 ble_positions[mac]["lng"] = tracker_lng
                 ble_positions[mac]["is_paired"] = True
                 ble_pairing[mac] = {"tracker_imei": imei, "start_time": now}
-                
-                # Save to database
+                pairing_duration = 0
+                is_paired = True
                 if DB_ENABLED:
                     try:
                         db_helper.update_ble_position(
@@ -708,36 +731,15 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                     except Exception as e:
                         logger.error(f"[DB] Error updating position: {e}")
                 continue
-            
+
             # ============================================================
-            # CASE 4: CONTINUOUS PAIRING (60s) - Towing detection
+            # CASE 4: TOWING CONFIRMED - Update position when paired (>60s)
+            # Only reached when distance > GPS_DRIFT_THRESHOLD (real movement)
             # ============================================================
-            current_pairing = ble_pairing.get(mac)
-            
-            if current_pairing is None or current_pairing.get("tracker_imei") != imei:
-                # New tracker - start pairing timer
-                ble_pairing[mac] = {"tracker_imei": imei, "start_time": now}
-                logger.info(f"BLE {mac} ({beacon_name}): New tracker {imei}, starting 60s pairing timer")
-                ble_positions[mac]["is_paired"] = False
-                ble_positions[mac]["pairing_duration"] = 0
-                continue
-            
-            # Same tracker - check pairing duration
-            pairing_duration = (now - ble_pairing[mac]["start_time"]).total_seconds()
-            ble_positions[mac]["pairing_duration"] = int(pairing_duration)
-            is_paired = pairing_duration >= PAIRING_THRESHOLD_SEC
-            ble_positions[mac]["is_paired"] = is_paired
-            
             if is_paired:
-                # Pairing confirmed (> 60 sec) - BLE is being towed, update position
-                # Note: We already filtered small movements (<25m) in Case 2
-                logger.info(f"BLE {mac} ({beacon_name}): TOWING CONFIRMED (paired {pairing_duration:.0f}s), moved {distance_m:.0f}m -> UPDATING")
-                
+                logger.info(f"BLE {mac} ({beacon_name}): TOWING ({pairing_duration:.0f}s), moved {distance_m:.0f}m -> UPDATING")
                 ble_positions[mac]["lat"] = tracker_lat
                 ble_positions[mac]["lng"] = tracker_lng
-                ble_positions[mac]["is_paired"] = True
-                
-                # Save to database
                 if DB_ENABLED:
                     try:
                         db_helper.update_ble_position(
@@ -755,8 +757,7 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                     except Exception as e:
                         logger.error(f"DB save error: {e}")
             else:
-                # Not yet paired - waiting for 60s continuous detection
-                logger.debug(f"BLE {mac}: Pairing in progress ({pairing_duration:.0f}s / {PAIRING_THRESHOLD_SEC}s)")
+                logger.debug(f"BLE {mac}: Waiting for 60s pairing ({pairing_duration:.0f}s so far)")
             
             # Update beacon with position info
             pos = ble_positions[mac]
@@ -797,8 +798,12 @@ def handle_client(client_socket: socket.socket, address: tuple):
     try:
         # First, receive IMEI (authentication)
         imei_data = client_socket.recv(256)
+        logger.info(f"[TCP] Received {len(imei_data)} bytes for IMEI: {imei_data.hex()[:100]}")
+        
         if len(imei_data) >= 2:
             imei_length = struct.unpack(">H", imei_data[0:2])[0]
+            logger.info(f"[TCP] IMEI length field: {imei_length}, total bytes: {len(imei_data)}")
+            
             if imei_length > 0 and len(imei_data) >= 2 + imei_length:
                 imei = imei_data[2:2+imei_length].decode('ascii')
                 logger.info(f"[TCP] Device authenticated: IMEI {imei}")
@@ -818,9 +823,13 @@ def handle_client(client_socket: socket.socket, address: tuple):
                             "beacons": [],
                         }
             else:
-                logger.warning(f"[TCP] Invalid IMEI from {address}")
+                logger.warning(f"[TCP] Invalid IMEI from {address}: length={imei_length}, data_len={len(imei_data)}")
                 client_socket.send(b'\x00')
                 return
+        else:
+            logger.warning(f"[TCP] IMEI packet too short from {address}: {len(imei_data)} bytes")
+            client_socket.send(b'\x00')
+            return
         
         # Receive data packets
         while True:
@@ -1010,7 +1019,10 @@ def data():
             }
         
         # Then, update with stored positions (in-memory - most recent)
+        # Only include known BLE definitions — ignore WiFi APs and unknown devices
         for mac, pos in ble_positions.items():
+            if mac not in ble_definitions:
+                continue  # Skip unknown MACs (WiFi APs, etc.)
             ble_info = ble_definitions.get(mac, {})
             all_ble[mac] = {
                 "lat": pos.get("lat"),  # Original position - no offset
@@ -1033,7 +1045,9 @@ def data():
             try:
                 db_positions = db_helper.get_all_ble_positions()
                 for mac, db_pos in db_positions.items():
-                    # Only use DB position if we don't have it in memory or memory has no position
+                    # Only use DB position for KNOWN beacons and only when memory has no position
+                    if mac not in ble_definitions:
+                        continue  # Skip WiFi APs and unknown MACs stored in DB
                     if mac not in ble_positions or ble_positions[mac].get("lat") is None:
                         ble_info = ble_definitions.get(mac, {})
                         all_ble[mac] = {
@@ -1089,6 +1103,49 @@ def get_trackers():
             "trackers": trackers,
             "count": len(trackers),
         })
+
+
+@app.get("/api/trackers")
+def api_get_trackers():
+    """Get all connected trackers (API endpoint for troubleshooting)"""
+    with data_lock:
+        tracker_list = []
+        for imei, data in trackers.items():
+            tracker_list.append({
+                "imei": imei,
+                "lat": data.get("lat"),
+                "lng": data.get("lng"),
+                "speed": data.get("speed", 0),
+                "heading": data.get("heading", 0),
+                "timestamp": data.get("timestamp"),
+                "beacons": data.get("beacons", [])
+            })
+        return jsonify(tracker_list)
+
+
+@app.get("/api/ble")
+def api_get_ble():
+    """Get all BLE assets (API endpoint for troubleshooting)"""
+    with data_lock:
+        ble_list = []
+        
+        # Get all BLE positions
+        for mac, pos in ble_positions.items():
+            ble_info = ble_definitions.get(mac, {})
+            ble_list.append({
+                "mac": mac,
+                "name": ble_info.get("name", mac[:8]),
+                "category": ble_info.get("category", "Unknown"),
+                "lat": pos.get("lat"),
+                "lng": pos.get("lng"),
+                "tracker_imei": pos.get("tracker_imei"),
+                "last_update": pos.get("last_update"),
+                "is_paired": pos.get("is_paired", False),
+                "battery": pos.get("battery"),
+                "rssi": pos.get("rssi")
+            })
+        
+        return jsonify({"ble_assets": ble_list})
 
 
 @app.route("/ble/set-position", methods=["POST"])
@@ -1196,6 +1253,263 @@ def set_all_home():
 
 
 # ============================================================
+# RUTX11 BLE WEBHOOK  (fixed-scanner, event-driven, no pairing timer)
+# ============================================================
+
+# RUTX11 scanner registry: { hostname/mac → { lat, lng, name } }
+rutx11_scanners: Dict[str, Dict] = {}
+
+
+def _parse_rutx11_payload(payload: dict) -> tuple:
+    """
+    Parse RUTX11 BLE JSON payload — handles multiple firmware formats.
+
+    Format A — data_sender collection (named plugin sections):
+      { "Streaming_Data": {"name":"RUTX1100XXXX", ...},
+        "Bluetooth_Monitor": [{"mac":"7C:D9:F4:07:F9:5C","rssi":-43,...}],
+        "GPS_Monitoring": {"latitude":32.31,"longitude":34.93,...} }
+
+    Format B — simple webhook:
+      { "host":"RUTX11", "lat":32.31, "lng":34.93,
+        "data": [{"mac":"7c:d9:f4:07:f9:5c","rssi":-65}] }
+
+    Returns (scanner_id, scanner_lat, scanner_lng, beacons_list)
+    where each beacon = { mac, rssi, name, battery, ... }
+    """
+    # ── Format A: data_sender collection ──────────────────────────────
+    streaming = payload.get("Streaming_Data") or {}
+    gps_mon   = payload.get("GPS_Monitoring") or {}
+
+    if streaming or gps_mon:
+        # Scanner ID from device name
+        scanner_id = (
+            streaming.get("name") or
+            streaming.get("serial") or
+            "RUTX11"
+        )
+
+        # GPS from GPS_Monitoring section
+        scanner_lat = gps_mon.get("latitude") or gps_mon.get("lat")
+        scanner_lng = gps_mon.get("longitude") or gps_mon.get("lon") or gps_mon.get("lng")
+
+        # Bluetooth beacons — key is the input's custom name ("Bluetooth_Monitor")
+        # Also try common alternative names for the BLE input
+        beacons_raw = (
+            payload.get("Bluetooth_Monitor") or
+            payload.get("bluetooth_monitor") or
+            payload.get("bluetooth") or
+            payload.get("BLE_Monitor") or
+            []
+        )
+        # NOTE: Do NOT fall back to generic list search here — it would pick up
+        # WiFi_scanner_Monitoring data which also contains mac+signal entries.
+
+    # ── Format B: simple webhook ───────────────────────────────────────
+    else:
+        scanner_id = (
+            payload.get("host") or
+            payload.get("hostname") or
+            payload.get("scanner") or
+            payload.get("device") or
+            "RUTX11"
+        )
+        scanner_lat = payload.get("lat") or payload.get("latitude")
+        scanner_lng = payload.get("lng") or payload.get("lon") or payload.get("longitude")
+        beacons_raw = (
+            payload.get("data") or
+            payload.get("sensors") or
+            payload.get("beacons") or
+            payload.get("devices") or
+            payload.get("results") or
+            []
+        )
+
+    # ── Fall back to registered position if GPS missing ───────────────
+    if not scanner_lat and scanner_id in rutx11_scanners:
+        scanner_lat = rutx11_scanners[scanner_id].get("lat")
+        scanner_lng = rutx11_scanners[scanner_id].get("lng")
+
+    # Normalize GPS to float
+    try:
+        scanner_lat = float(scanner_lat) if scanner_lat is not None else None
+        scanner_lng = float(scanner_lng) if scanner_lng is not None else None
+    except (TypeError, ValueError):
+        scanner_lat = scanner_lng = None
+
+    # ── Build beacon list ──────────────────────────────────────────────
+    beacons = []
+    for b in beacons_raw:
+        if not isinstance(b, dict):
+            continue
+        mac = (b.get("mac") or b.get("id") or b.get("address") or "").upper().replace(":", "").lower()
+        if len(mac) != 12:
+            continue
+        beacons.append({
+            "mac":     mac,
+            "rssi":    b.get("rssi") or b.get("signal") or b.get("RSSI"),
+            "name":    b.get("name") or b.get("label") or "",
+            "battery": b.get("battery") or b.get("battery_level"),
+            "temp":    b.get("temperature") or b.get("temp"),
+            "scan_ts": b.get("date_iso_8601") or b.get("timestamp"),
+            "raw":     b,
+        })
+
+    return scanner_id, scanner_lat, scanner_lng, beacons
+
+
+@app.route("/api/rutx11", methods=["POST"])
+def rutx11_webhook():
+    """
+    RUTX11 BLE Webhook — receives live beacon detections from the fixed scanner.
+    No 60-second pairing timer: if the RUTX11 sees a beacon, it IS there.
+
+    Stores every event to BLE_Scans (historical) and updates BLE_Positions (current).
+
+    Expected JSON (flexible — handles multiple RUTX11 firmware formats):
+      { "host": "RUTX11", "lat": 32.123, "lng": 34.456,
+        "data": [{ "mac": "7c:d9:f4:07:f9:5c", "rssi": -65, "battery": 80 }] }
+    """
+    from flask import request
+    try:
+        payload = request.get_json(force=True)
+        if not payload:
+            return jsonify({"success": False, "error": "Empty payload"}), 400
+
+        scanner_id, scanner_lat, scanner_lng, beacons = _parse_rutx11_payload(payload)
+
+        if not beacons:
+            return jsonify({"success": True, "message": "No beacons in payload", "scanner": scanner_id})
+
+        now = datetime.now()
+        updated = []
+
+        with data_lock:
+            for b in beacons:
+                mac = b["mac"]
+                rssi = b["rssi"]
+                battery = b["battery"]
+
+                # Look up known beacon definition
+                bdef = ble_definitions.get(mac, {})
+                beacon_name  = b["name"] or bdef.get("name") or mac
+                is_known     = mac in ble_definitions
+
+                # Only update position if we have scanner coordinates
+                if scanner_lat is not None and scanner_lng is not None:
+                    prev = ble_positions.get(mac, {})
+                    ble_positions[mac] = {
+                        "mac":          mac,
+                        "name":         beacon_name,
+                        "category":     bdef.get("category", "Unknown"),
+                        "lat":          scanner_lat,
+                        "lng":          scanner_lng,
+                        "tracker_imei": f"rutx11:{scanner_id}",
+                        "tracker_label": scanner_id,
+                        "last_update":  now.isoformat(),
+                        "last_seen":    now,
+                        "is_paired":    True,          # Fixed scanner = always "paired"
+                        "pairing_duration": 0,
+                        "battery":      battery if battery is not None else prev.get("battery"),
+                        "rssi":         rssi,
+                        "source":       "rutx11",
+                    }
+
+                    # Store to BLE_Positions in DB
+                    if DB_ENABLED:
+                        try:
+                            db_helper.update_ble_position(
+                                mac=mac, lat=scanner_lat, lng=scanner_lng,
+                                tracker_id=f"rutx11:{scanner_id}",
+                                tracker_label=scanner_id,
+                                is_paired=True,
+                                battery_percent=battery,
+                            )
+                        except Exception as db_err:
+                            logger.warning(f"[RUTX11] DB BLE_Positions error: {db_err}")
+
+                # Always store raw scan event to BLE_Scans (historical log)
+                if DB_ENABLED:
+                    try:
+                        db_helper.log_ble_scan(
+                            mac=mac,
+                            lat=scanner_lat, lng=scanner_lng,
+                            tracker_imei=f"rutx11:{scanner_id}",
+                            tracker_label=scanner_id,
+                            rssi=rssi,
+                            battery_percent=battery,
+                            is_known_beacon=is_known,
+                        )
+                    except Exception as db_err:
+                        logger.warning(f"[RUTX11] DB BLE_Scans error: {db_err}")
+
+                updated.append({"mac": mac, "name": beacon_name, "rssi": rssi, "known": is_known})
+                logger.info(
+                    f"[RUTX11] {beacon_name} ({mac}) rssi={rssi} "
+                    f"at scanner={scanner_id} ({scanner_lat},{scanner_lng})"
+                )
+
+        return jsonify({
+            "success":  True,
+            "scanner":  scanner_id,
+            "received": len(beacons),
+            "updated":  updated,
+        })
+
+    except Exception as e:
+        logger.error(f"[RUTX11] Webhook error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/rutx11/register", methods=["POST"])
+def rutx11_register():
+    """
+    Register a RUTX11 scanner with its fixed GPS position.
+    Call once to tell the broker where the RUTX11 is physically located.
+
+    POST body: { "scanner_id": "RUTX11", "lat": 32.123, "lng": 34.456, "name": "Terminal 3 Gate 5" }
+    """
+    from flask import request
+    try:
+        data = request.get_json(force=True)
+        scanner_id = data.get("scanner_id") or data.get("host") or data.get("hostname", "RUTX11")
+        lat  = float(data["lat"])
+        lng  = float(data["lng"])
+        name = data.get("name", scanner_id)
+
+        rutx11_scanners[scanner_id] = {"lat": lat, "lng": lng, "name": name}
+
+        # Persist to System_Config so it survives restarts
+        if DB_ENABLED:
+            try:
+                import json as _json
+                conn   = db_helper.get_connection()
+                cursor = conn.cursor()
+                key = f"rutx11_scanner_{scanner_id}"
+                val = _json.dumps({"lat": lat, "lng": lng, "name": name})
+                cursor.execute("""
+                    MERGE System_Config AS target
+                    USING (VALUES (?, ?)) AS source (config_key, config_value)
+                    ON target.config_key = source.config_key
+                    WHEN MATCHED THEN UPDATE SET config_value = source.config_value
+                    WHEN NOT MATCHED THEN INSERT (config_key, config_value) VALUES (source.config_key, source.config_value);
+                """, key, val)
+                conn.commit()
+            except Exception as db_err:
+                logger.warning(f"[RUTX11] DB register error: {db_err}")
+
+        logger.info(f"[RUTX11] Registered scanner '{scanner_id}' at ({lat}, {lng}) name='{name}'")
+        return jsonify({"success": True, "scanner_id": scanner_id, "lat": lat, "lng": lng})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.get("/api/rutx11/scanners")
+def rutx11_list_scanners():
+    """List all registered RUTX11 scanners and their positions."""
+    return jsonify({"scanners": rutx11_scanners})
+
+
+# ============================================================
 # MAIN
 # ============================================================
 def main():
@@ -1229,6 +1543,13 @@ def main():
                         "battery": pos.get("battery_percent"),
                     }
             logger.info(f"[DB] Loaded {len(db_positions)} stored BLE positions")
+
+            # Load persisted RUTX11 scanner registrations
+            loaded_scanners = db_helper.get_rutx11_scanners()
+            rutx11_scanners.update(loaded_scanners)
+            if loaded_scanners:
+                for sid, info in loaded_scanners.items():
+                    logger.info(f"[DB] Loaded RUTX11 scanner '{sid}' at ({info.get('lat')},{info.get('lng')}) — {info.get('name','')}")
         except Exception as e:
             logger.error(f"[DB] Load error: {e}")
     
