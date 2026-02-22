@@ -858,6 +858,14 @@
               <span class="beacon-row-label">Lat / Long</span>
               <span class="beacon-row-value" style="font-family:monospace;font-size:10px">${latStr}, ${lngStr}</span>
             </div>
+            ${beacon.rssi != null ? `<div class="beacon-row">
+              <span class="beacon-row-label">Signal (RSSI)</span>
+              <span class="beacon-row-value" style="font-family:monospace">${Math.round(beacon.rssi)} dBm</span>
+            </div>` : ""}
+            ${beacon.estimatedDistance != null ? `<div class="beacon-row">
+              <span class="beacon-row-label">~Distance</span>
+              <span class="beacon-row-value">~${beacon.estimatedDistance.toFixed(1)} m from ${beacon.hostTrackerLabel}</span>
+            </div>` : ""}
             ${beacon.lastSeen ? `<div class="beacon-row">
               <span class="beacon-row-label">Last Seen</span>
               <span class="beacon-row-value">${beacon.lastSeen}</span>
@@ -866,13 +874,17 @@
               <div style="font-weight:600;margin-bottom:4px;">📍 BLE Position Info</div>
               <div>Last set by: <strong>${beacon.lastSeenByTracker || beacon.hostTrackerLabel}</strong></div>
               ${beacon.lastSeenAt || beacon.lastUpdate ? `<div>Last saw: <strong>${formatLastSaw(beacon.lastSeenAt || beacon.lastUpdate)}</strong></div>` : ""}
-              ${beacon.isPaired ? 
-                `<div style="color:#059669;font-weight:600;">🔗 PAIRED (${beacon.pairingDuration}s) - Following tracker</div>` : 
+              ${beacon.isPaired ?
+                `<div style="color:#059669;font-weight:600;">🔗 PAIRED (${beacon.pairingDuration}s) - Following tracker</div>` :
                 beacon.pairingDuration > 0 ?
                 `<div style="color:#f59e0b;font-weight:600;">⏳ Pairing... (${beacon.pairingDuration}s / 60s)</div>` :
-                `<div style="color:#6b7280;">📍 Last known position (static)</div>`
+                `<div style="color:#6b7280;">📍 Last known position</div>`
               }
-              ${beacon.distanceFromTracker > 0 ? `<div>📏 Distance to tracker: <strong>${Math.round(beacon.distanceFromTracker)} m</strong></div>` : ''}
+              ${beacon.estimatedDistance != null
+                ? `<div>📡 RSSI distance: <strong>~${beacon.estimatedDistance.toFixed(1)} m</strong> from ${beacon.hostTrackerLabel}</div>`
+                : (beacon.distanceFromTracker > 0
+                  ? `<div>📏 Distance to tracker: <strong>${Math.round(beacon.distanceFromTracker)} m</strong></div>`
+                  : '')}
             </div>
           </div>
         `;
@@ -912,12 +924,53 @@
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         return R * c;
       }
-      
-      // ===== MARKER SPREADING FOR OVERLAPPING ICONS =====
-      // Shared position group so trackers and beacons at same location spread in one circle (no stacking)
+
+      // ===== RSSI-BASED DISTANCE ESTIMATION =====
+      // Log-distance path loss model for BLE signal strength -> approximate meters
+      const BLE_TX_POWER = -59;      // Teltonika Eye Beacon calibrated RSSI at 1 meter
+      const BLE_PATH_LOSS_N = 2.5;   // Path loss exponent (mixed outdoor/near-vehicle environment)
+      const BLE_MIN_SPREAD = 2;      // Min 2m visual offset — never stack beacon on tracker icon
+      const BLE_MAX_SPREAD = 30;     // Max 30m — conservative cap so ground crew isn't misled
+
+      function rssiToMeters(rssi) {
+        if (rssi == null || !Number.isFinite(rssi)) return null;
+        const d = Math.pow(10, (BLE_TX_POWER - rssi) / (10 * BLE_PATH_LOSS_N));
+        return Math.max(BLE_MIN_SPREAD, Math.min(BLE_MAX_SPREAD, d));
+      }
+
+      function metersToLatOffset(m) { return m / 111320; }
+      function metersToLngOffset(m, lat) { return m / (111320 * Math.cos(lat * Math.PI / 180)); }
+
+      // ===== RSSI SMOOTHING (prevent jitter between 5s refreshes) =====
+      const beaconRssiSmoothed = {};
+      const RSSI_SMOOTH_ALPHA = 0.3; // Lower = smoother but slower to react
+
+      function smoothRssi(mac, rawRssi) {
+        if (rawRssi == null) return beaconRssiSmoothed[mac] || null;
+        const prev = beaconRssiSmoothed[mac];
+        const smoothed = prev != null ? RSSI_SMOOTH_ALPHA * rawRssi + (1 - RSSI_SMOOTH_ALPHA) * prev : rawRssi;
+        beaconRssiSmoothed[mac] = smoothed;
+        return smoothed;
+      }
+
+      // ===== RSSI-AWARE BEACON SPREAD =====
+      // Beacons spread around their detecting tracker at RSSI-estimated distance
+      // Each beacon gets a unique angle; distance proportional to signal strength
+      function getBeaconRssiOffset(baseLat, rssi, beaconIndex, totalBeacons) {
+        const meters = rssi != null ? rssiToMeters(rssi) : 15; // 15m default when no RSSI
+        if (meters == null || totalBeacons <= 0) return { lat: 0, lng: 0 };
+        const angle = (beaconIndex / totalBeacons) * 2 * Math.PI;
+        return {
+          lat: metersToLatOffset(meters) * Math.sin(angle),
+          lng: metersToLngOffset(meters, baseLat) * Math.cos(angle)
+        };
+      }
+
+      // ===== MARKER SPREADING FOR OVERLAPPING TRACKER ICONS =====
+      // Shared position group so trackers at same location spread in one circle (no stacking)
       const positionGroups = {};
       const SPREAD_DISTANCE = 0.00014; // ~15m radius so markers are readable and don't overlap
-      
+
       function getSpreadOffset(lat, lng, markerId) {
         const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
         if (!positionGroups[key]) positionGroups[key] = [];
@@ -934,62 +987,78 @@
           lng: SPREAD_DISTANCE * Math.cos(angle)
         };
       }
-      
+
       function clearMarkerPositions() {
         Object.keys(positionGroups).forEach(key => { positionGroups[key] = []; });
       }
 
-      // Use ONLY ble_positions from API; trackers + beacons at same location share one spread circle - each beacon appears ONLY ONCE
-      // STATIC positions - only updated when paired > 60 seconds
+      // Dynamic RSSI-based beacon positioning: beacons spread around their detecting tracker
+      // at distances proportional to BLE signal strength. Updates position on every refresh.
+      // Priority: RUTX11 (tractor) > FMC/OBD (vehicles) > Navixy cloud (fallback)
       function updateBeaconMarkersFromSQL(blePositionsData, trackerRows) {
         const now = Date.now();
         const macs = Object.keys(blePositionsData);
-        
+
         // Create tracker lookup for labels
         const trackerLookup = {};
         trackerRows.forEach(row => {
           trackerLookup[row.tracker_id] = { lat: row.lat, lng: row.lng, label: row.label };
           if (row.imei) trackerLookup[row.imei] = { lat: row.lat, lng: row.lng, label: row.label };
         });
-        
-        // *** NEVER REMOVE BEACON MARKERS ***
-        // Static assets stay visible at last known position forever
-        // Only update content, not position (unless being towed)
-        console.log(`[BLE] Received ${macs.length} beacons from API`);
-        
-        // Update/create markers for each BLE in ble_positions (use shared getSpreadOffset so trackers + beacons spread together)
+
+        // Group beacons by detecting tracker for stable angle assignment
+        const trackerBeaconGroups = {};
+        Object.entries(blePositionsData).forEach(([mac, pos]) => {
+          const tid = pos.last_tracker_id || "unknown";
+          if (!trackerBeaconGroups[tid]) trackerBeaconGroups[tid] = [];
+          trackerBeaconGroups[tid].push(mac);
+        });
+        // Sort each group by MAC for stable angle assignment across refreshes
+        Object.values(trackerBeaconGroups).forEach(arr => arr.sort());
+
+        console.log(`[BLE] Received ${macs.length} beacons from API (${Object.keys(trackerBeaconGroups).length} tracker groups)`);
+
+        // Update/create markers for each beacon with RSSI-based offset from detecting tracker
         Object.entries(blePositionsData).forEach(([mac, pos]) => {
           const baseLat = Number(pos.lat);
           const baseLng = Number(pos.lng);
-          
+
           if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng)) {
             console.log(`[BLE] Skipping ${mac} - no position yet`);
             return;
           }
-          
-          const offset = getSpreadOffset(baseLat, baseLng, `beacon_${mac}`);
+
+          // RSSI-based spread: distance from signal strength, angle from group index
+          const trackerId = pos.last_tracker_id || "unknown";
+          const group = trackerBeaconGroups[trackerId] || [mac];
+          const idx = group.indexOf(mac);
+          const totalBeacons = group.length;
+          const rawRssi = pos.rssi != null ? Number(pos.rssi) : null;
+          const rssi = smoothRssi(mac, rawRssi);
+          const estDistance = rssiToMeters(rssi);
+          const offset = getBeaconRssiOffset(baseLat, rssi, idx, totalBeacons);
           const lat = baseLat + offset.lat;
           const lng = baseLng + offset.lng;
-          
+
           // Get BLE definition info
           const knownInfo = KNOWN_BEACONS[mac.toUpperCase()] || {};
           const name = pos.name || knownInfo.name || `Beacon ${mac.slice(-4)}`;
           const category = pos.category || knownInfo.category || "Uncategorized";
           const beaconType = pos.type || knownInfo.type || "eye_beacon";
           const sn = knownInfo.sn || "";
-          
+
           // Get tracker label
-          const trackerLabel = pos.last_tracker_label || 
+          const trackerLabel = pos.last_tracker_label ||
                                (trackerLookup[pos.last_tracker_id] ? trackerLookup[pos.last_tracker_id].label : pos.last_tracker_id) ||
                                "Unknown";
-          
+
           const beacon = {
             mac,
             name,
             category,
             beaconType,
             sn,
-            lat: baseLat, // Show original position in popup
+            lat: baseLat, // Show tracker anchor position in popup
             lng: baseLng,
             battery: pos.battery,
             isPaired: pos.is_paired,
@@ -998,15 +1067,17 @@
             lastSeenAt: pos.last_update,
             hostTrackerId: pos.last_tracker_id,
             hostTrackerLabel: trackerLabel,
+            rssi: rssi,
+            estimatedDistance: estDistance,
           };
-          
+
           let marker = beaconMarkers[mac];
           if (!marker) {
-            // Create new marker at STABLE position
+            // Create new marker
             marker = L.marker([lat, lng], {
               icon: createBeaconIcon(beaconType, category),
             }).bindPopup(beaconPopupHtml(beacon));
-            
+
             const catConfig = CATEGORY_CONFIG[category] || CATEGORY_CONFIG["Uncategorized"];
             const shapeSymbols = { diamond: "◆", square: "■", triangle: "▲", circle: "●", star: "★", hexagon: "⬡" };
             const symbol = shapeSymbols[catConfig.shape] || "●";
@@ -1016,17 +1087,18 @@
               offset: [0, -12],
               className: "beacon-tooltip"
             });
-            
+
             beaconMarkers[mac] = marker;
             marker.addTo(beaconLayer);
-            console.log(`[BLE] Added STATIC marker: ${mac} (${name}) at (${lat.toFixed(6)}, ${lng.toFixed(6)})`);
+            console.log(`[BLE] Added marker: ${mac} (${name}) RSSI=${rawRssi} ~${estDistance ? estDistance.toFixed(1) + 'm' : 'N/A'} at (${lat.toFixed(6)}, ${lng.toFixed(6)})`);
           } else {
-            // Only update popup content, NOT position (markers are STATIC)
+            // Update BOTH position and popup on every refresh (dynamic positioning)
+            marker.setLatLng([lat, lng]);
             marker.setPopupContent(beaconPopupHtml(beacon));
           }
         });
-        
-        console.log(`[BLE] Total STATIC markers: ${Object.keys(beaconMarkers).length}`);
+
+        console.log(`[BLE] Total beacon markers: ${Object.keys(beaconMarkers).length}`);
       }
 
       // OLD: Keep for reference but not used
