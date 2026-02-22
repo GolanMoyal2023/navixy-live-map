@@ -1,101 +1,108 @@
 # Post-Startup Sync Script
-# Runs after services start to sync tunnel URL and open dashboard
-# This can be added to Windows Task Scheduler to run at logon
+# Runs 1 minute after logon (via NavixyPostStartupSync scheduled task)
+# Ensures ngrok HTTP tunnel is active and api-url.json is current on GitHub Pages
 
 $ErrorActionPreference = "Continue"
 $root = "D:\New_Recovery\2Plus\navixy-live-map"
 
-# Setup logging
-$logDir = "$root\service\logs"
+$logDir  = "$root\service\logs"
 $logFile = "$logDir\post_startup.log"
 
-function Write-Log {
-    param($Message)
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timestamp - $Message" | Out-File -Append -FilePath $logFile
+function Write-Log($msg) {
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$ts - $msg" | Out-File -Append -FilePath $logFile
 }
 
 Write-Log "=== Post-Startup Sync Started ==="
 
-# Wait for services to fully start
-Write-Log "Waiting 30 seconds for services to initialize..."
-Start-Sleep -Seconds 30
+# ----------------------------------------------------------------
+# STEP 1 - Wait for ngrok REST API to be available (up to 60s)
+# ----------------------------------------------------------------
+Write-Log "Waiting for ngrok REST API on :4040..."
+$ready = $false
+for ($i = 0; $i -lt 30; $i++) {
+    try {
+        Invoke-RestMethod "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop | Out-Null
+        $ready = $true; break
+    } catch { Start-Sleep -Seconds 2 }
+}
+if (-not $ready) { Write-Log "ngrok not available after 60s - aborting"; exit 1 }
+Write-Log "ngrok REST API ready"
 
-# Check if tunnel service is running
-$tunnelService = Get-Service -Name "NavixyQuickTunnel" -ErrorAction SilentlyContinue
-if (-not $tunnelService -or $tunnelService.Status -ne "Running") {
-    Write-Log "Tunnel service not running, starting it..."
-    Start-Service -Name "NavixyQuickTunnel" -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 15
+# ----------------------------------------------------------------
+# STEP 2 - Ensure HTTP tunnel for broker :8768 exists
+# ----------------------------------------------------------------
+$tunnelName = "broker-http"
+$brokerUrl  = $null
+
+try {
+    $existing  = Invoke-RestMethod "http://127.0.0.1:4040/api/tunnels/$tunnelName" -ErrorAction Stop
+    $brokerUrl = $existing.public_url
+    Write-Log "HTTP tunnel already exists: $brokerUrl"
+} catch {
+    Write-Log "Adding HTTP tunnel for :8768..."
+    try {
+        $body     = '{"name":"' + $tunnelName + '","proto":"http","addr":"8768"}'
+        $r        = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:4040/api/tunnels" `
+                        -ContentType "application/json" -Body $body -ErrorAction Stop
+        $brokerUrl = $r.public_url
+        Write-Log "HTTP tunnel created: $brokerUrl"
+    } catch {
+        Write-Log "Failed to create HTTP tunnel: $_"
+    }
 }
 
-# Wait for tunnel URL to appear in logs
-Write-Log "Looking for tunnel URL in logs..."
-$maxWait = 60
-$waitCount = 0
-$newUrl = $null
+if (-not $brokerUrl) { Write-Log "No broker URL - skipping api-url.json sync"; exit 1 }
 
-while ($waitCount -lt $maxWait -and -not $newUrl) {
-    $stderrLog = "$root\service\logs\quick_tunnel_stderr.log"
-    if (Test-Path $stderrLog) {
-        $logContent = Get-Content $stderrLog -Tail 100 -ErrorAction SilentlyContinue
-        foreach ($line in $logContent) {
-            if ($line -match 'https://([a-z0-9-]+\.trycloudflare\.com)') {
-                $newUrl = "https://$($Matches[1])"
-                break
-            }
-        }
-    }
-    if (-not $newUrl) {
-        Start-Sleep -Seconds 2
-        $waitCount += 2
-    }
+# ----------------------------------------------------------------
+# STEP 3 - Update api-url.json locally + push to GitHub Pages
+#          Git plumbing (no checkout) avoids locked log-file conflicts
+# ----------------------------------------------------------------
+$newDataUrl = "$brokerUrl/data"
+$apiUrlFile = "$root\api-url.json"
+$noBom      = New-Object System.Text.UTF8Encoding($false)
+
+$currentUrl = ""
+if (Test-Path $apiUrlFile) {
+    try { $currentUrl = ([IO.File]::ReadAllText($apiUrlFile, $noBom) | ConvertFrom-Json).dataUrl } catch {}
 }
 
-if ($newUrl) {
-    Write-Log "Found tunnel URL: $newUrl"
-    
-    # Read current URL
-    $urlFile = "$root\.quick_tunnel_url.txt"
-    $currentUrl = ""
-    if (Test-Path $urlFile) {
-        $currentUrl = [System.IO.File]::ReadAllText($urlFile).Trim() -replace '/data$', ''
-    }
-    
-    # Check if URL changed
-    if ($newUrl -ne $currentUrl) {
-        Write-Log "URL changed! Syncing to GitHub..."
-        
-        # Update .quick_tunnel_url.txt
-        "$newUrl/data" | Out-File -FilePath $urlFile -Encoding UTF8 -NoNewline
-        Write-Log "Updated .quick_tunnel_url.txt"
-        
-        # Update index.html
-        $indexFile = "$root\index.html"
-        $indexContent = Get-Content $indexFile -Raw
-        $pattern = 'const LIVE_API_URL = "https://[^"]+/data"'
-        $replacement = "const LIVE_API_URL = `"$newUrl/data`""
-        $newContent = $indexContent -replace $pattern, $replacement
-        $newContent | Set-Content $indexFile -NoNewline
-        Write-Log "Updated index.html"
-        
-        # Push to GitHub
-        Set-Location $root
-        git add index.html 2>&1 | Out-Null
-        git commit -m "Auto-sync tunnel URL on startup: $newUrl" 2>&1 | Out-Null
-        $pushResult = git push 2>&1
-        Write-Log "Git push result: $pushResult"
-        
-        Write-Log "✅ URL synced to GitHub!"
-    } else {
-        Write-Log "URL unchanged, no sync needed"
-    }
+if ($currentUrl -eq $newDataUrl) {
+    Write-Log "api-url.json already correct: $newDataUrl"
 } else {
-    Write-Log "❌ Could not find tunnel URL in logs"
-}
+    Write-Log "Updating api-url.json: $newDataUrl"
+    $json = "{`"dataUrl`":`"$newDataUrl`"}"
+    [IO.File]::WriteAllText($apiUrlFile, $json, $noBom)
 
-# Open dashboard in browser
-Write-Log "Opening dashboard..."
-Start-Process "http://localhost:8766"
+    Push-Location $root
+    try {
+        git fetch origin main --quiet 2>$null
+
+        $tmp = [IO.Path]::GetTempFileName()
+        [IO.File]::WriteAllText($tmp, $json, $noBom)
+        $blobHash = (git hash-object -w $tmp).Trim()
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+
+        $treeLines = (git ls-tree "origin/main") | Where-Object { $_ -notmatch "api-url" }
+        $newEntry  = "100644 blob $blobHash`tapi-url.json"
+        $treeFile  = [IO.Path]::GetTempFileName()
+        [IO.File]::WriteAllText($treeFile, (($treeLines + $newEntry) -join "`n") + "`n", $noBom)
+        $newTree = (cmd /c "git mktree < `"$treeFile`"").Trim()
+        Remove-Item $treeFile -ErrorAction SilentlyContinue
+
+        if ($newTree) {
+            $parent  = (git rev-parse "origin/main").Trim()
+            $msgFile = [IO.Path]::GetTempFileName()
+            [IO.File]::WriteAllText($msgFile, "Auto-sync broker URL $(Get-Date -Format 'yyyy-MM-dd HH:mm')", $noBom)
+            $newCom  = (cmd /c "git commit-tree $newTree -p $parent -F `"$msgFile`"").Trim()
+            Remove-Item $msgFile -ErrorAction SilentlyContinue
+            if ($newCom) {
+                git push origin "${newCom}:refs/heads/main" 2>&1 | Out-Null
+                Write-Log "Pushed api-url.json ($($newCom.Substring(0,7)))"
+            } else { Write-Log "commit-tree failed" }
+        } else { Write-Log "mktree failed" }
+    } catch { Write-Log "Git push error: $_" }
+    finally  { Pop-Location }
+}
 
 Write-Log "=== Post-Startup Sync Complete ==="
