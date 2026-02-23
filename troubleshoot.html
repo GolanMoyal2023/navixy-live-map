@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Sources - Navixy Trackers | Teltonika Eyebecons | BT Eyebecons</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 12px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 16px;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+        }
+        .header h1 { color: white; font-size: 1.6em; margin-bottom: 4px; }
+        .header p { color: rgba(255,255,255,0.85); font-size: 0.95em; }
+
+        .controls {
+            display: flex; justify-content: center; gap: 12px;
+            margin-bottom: 14px; flex-wrap: wrap;
+        }
+        .controls button {
+            padding: 10px 20px; font-size: 14px; border: none;
+            border-radius: 6px; cursor: pointer; font-weight: 600; transition: all 0.2s;
+        }
+        .controls button.start { background: #10b981; color: white; }
+        .controls button.start:hover { background: #059669; }
+        .controls button.stop { background: #ef4444; color: white; }
+        .controls button.stop:hover { background: #dc2626; }
+        .controls button.refresh { background: #3b82f6; color: white; }
+        .controls button.refresh:hover { background: #2563eb; }
+
+        .status-bar {
+            display: flex; justify-content: space-around; margin-bottom: 14px; gap: 8px; flex-wrap: wrap;
+        }
+        .status-item {
+            background: #2d2d2d; padding: 10px 16px; border-radius: 8px;
+            text-align: center; flex: 1; min-width: 140px; border: 2px solid #404040;
+        }
+        .status-item.online { border-color: #10b981; }
+        .status-item.offline { border-color: #ef4444; }
+        .status-label { font-size: 0.8em; color: #9ca3af; margin-bottom: 3px; }
+        .status-value { font-size: 1.2em; font-weight: bold; }
+        .status-value.online { color: #10b981; }
+        .status-value.offline { color: #ef4444; }
+
+        /* 3-column grid */
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        @media (max-width: 1400px) { .container { grid-template-columns: 1fr; } }
+
+        .panel {
+            background: #2d2d2d; border-radius: 10px; padding: 14px;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.3); overflow-y: auto; max-height: 80vh;
+        }
+        .panel-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 12px; padding-bottom: 10px; border-bottom: 2px solid #404040;
+        }
+        .panel-title { font-size: 1.2em; font-weight: bold; }
+        .panel-title.navixy { color: #3b82f6; }
+        .panel-title.ngrok { color: #f59e0b; }
+        .panel-title.broker { color: #10b981; }
+        .panel-timestamp { font-size: 0.85em; color: #9ca3af; }
+
+        .section-title { font-size: 1.05em; color: #f59e0b; margin-bottom: 8px; font-weight: 600; }
+        .data-section { margin-bottom: 14px; }
+
+        .tracker-card, .ble-card {
+            background: #1a1a1a; padding: 12px; margin-bottom: 8px;
+            border-radius: 8px; border-left: 4px solid #667eea;
+        }
+        .ble-card { border-left-color: #10b981; }
+        .ble-card.stale { border-left-color: #ef4444; opacity: 0.7; }
+        .card-title { font-weight: bold; color: #f59e0b; margin-bottom: 6px; font-size: 1em; }
+        .card-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.88em; }
+        .card-label { color: #9ca3af; }
+        .card-value { color: #e0e0e0; font-weight: 500; text-align: right; max-width: 60%; word-break: break-all; }
+        .card-value.stale { color: #ef4444; }
+        .card-value.fresh { color: #10b981; }
+
+        .error-message {
+            background: #7f1d1d; color: #fca5a5; padding: 12px;
+            border-radius: 8px; margin: 8px 0; border-left: 4px solid #ef4444; font-size: 0.9em;
+        }
+        .no-data { text-align: center; color: #9ca3af; padding: 30px; font-size: 1em; }
+
+        .badge {
+            display: inline-block; padding: 3px 8px; border-radius: 10px;
+            font-size: 0.78em; font-weight: 600; margin-left: 6px;
+        }
+        .badge.success { background: #065f46; color: #10b981; }
+        .badge.warning { background: #78350f; color: #f59e0b; }
+        .badge.error { background: #7f1d1d; color: #ef4444; }
+
+        .comparison-section {
+            background: #2d2d2d; border-radius: 10px; padding: 16px; margin-top: 14px;
+        }
+        .comparison-title { font-size: 1.3em; color: #f59e0b; margin-bottom: 12px; text-align: center; }
+        .comp-table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+        .comp-table th, .comp-table td { padding: 8px 6px; text-align: left; border-bottom: 1px solid #404040; }
+        .comp-table th { background: #1a1a1a; color: #f59e0b; font-weight: 600; position: sticky; top: 0; }
+        .comp-table tr:hover { background: #3a3a3a; }
+        .comp-table td.match { color: #10b981; }
+        .comp-table td.diff { color: #ef4444; }
+
+        .raw-json {
+            background: #1a1a1a; padding: 10px; border-radius: 8px;
+            overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.8em;
+            max-height: 300px; overflow-y: auto;
+        }
+        .raw-json pre { margin: 0; color: #10b981; }
+
+        .rssi-bar {
+            display: inline-block; height: 8px; border-radius: 4px;
+            vertical-align: middle; margin-right: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Data Sources - Beacon Behaviour Comparison</h1>
+        <p>Left: Navixy Trackers | Middle: Teltonika Eyebecons | Right: BT Eyebecons</p>
+    </div>
+
+    <div class="controls">
+        <button class="start" onclick="startAutoRefresh()">&#9654; Auto-Refresh (5s)</button>
+        <button class="stop" onclick="stopAutoRefresh()">&#9208; Stop</button>
+        <button class="refresh" onclick="fetchAllData()">&#128260; Refresh Now</button>
+    </div>
+
+    <div class="status-bar">
+        <div class="status-item" id="navixy-status">
+            <div class="status-label">Navixy Trackers (:8767)</div>
+            <div class="status-value" id="navixy-status-text">--</div>
+        </div>
+        <div class="status-item" id="teltonika-status">
+            <div class="status-label">Teltonika Eyebecons (:8767)</div>
+            <div class="status-value" id="teltonika-status-text">--</div>
+        </div>
+        <div class="status-item" id="broker-status">
+            <div class="status-label">BT Eyebecons (:8768)</div>
+            <div class="status-value" id="broker-status-text">--</div>
+        </div>
+        <div class="status-item">
+            <div class="status-label">Last Update</div>
+            <div class="status-value" id="last-update">--</div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- LEFT: Navixy Trackers -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title navixy">Navixy Trackers</div>
+                <div class="panel-timestamp" id="navixy-timestamp">-</div>
+            </div>
+            <div id="navixy-content"><div class="no-data">Loading...</div></div>
+        </div>
+
+        <!-- MIDDLE: Teltonika Eyebecons (FMC beacon positions from Navixy cloud) -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title ngrok">Teltonika Eyebecons</div>
+                <div class="panel-timestamp" id="teltonika-timestamp">-</div>
+            </div>
+            <div id="teltonika-content"><div class="no-data">Loading...</div></div>
+        </div>
+
+        <!-- RIGHT: BT Eyebecons -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title broker">BT Eyebecons</div>
+                <div class="panel-timestamp" id="broker-timestamp">-</div>
+            </div>
+            <div id="broker-content"><div class="no-data">Loading...</div></div>
+        </div>
+    </div>
+
+    <div class="comparison-section">
+        <div class="comparison-title">Beacon Comparison (all 3 sources side-by-side)</div>
+        <div id="comparison-content"><div class="no-data">Run a refresh to see comparison</div></div>
+    </div>
+
+    <script>
+        let autoRefreshInterval = null;
+
+        // API endpoints
+        const NAVIXY_API  = 'http://127.0.0.1:8767/data';  // Navixy cloud (FMC/OBD trackers)
+        const BROKER_API  = 'http://127.0.0.1:8768/data';  // RUTX11 broker (BLE beacons)
+
+        // Known beacon definitions (match index.html)
+        const KNOWN_BEACONS = {
+            "7cd9f407f95c": { name: "Eybe2plus1", category: "Towed Device" },
+            "7cd9f4003536": { name: "Eybe2plus2", category: "Equipment" },
+            "7cd9f406427b": { name: "EyeBe3",     category: "Equipment" },
+            "7cd9f407a2db": { name: "EyeBe4",     category: "Equipment" },
+            "7cd9f4116ee7": { name: "Eysen2plus", category: "Safety" },
+        };
+
+        // ---- Helper: format time ago ----
+        function timeAgo(dateStr) {
+            if (!dateStr) return 'N/A';
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return dateStr;
+            const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+            if (sec < 60) return sec + 's ago';
+            if (sec < 3600) return Math.floor(sec/60) + 'm ago';
+            if (sec < 86400) return Math.floor(sec/3600) + 'h ago';
+            return Math.floor(sec/86400) + 'd ago';
+        }
+
+        function isStale(dateStr, thresholdSec) {
+            if (!dateStr) return true;
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return true;
+            return (Date.now() - d.getTime()) / 1000 > (thresholdSec || 300);
+        }
+
+        // ---- RSSI bar visual ----
+        function rssiBar(rssi) {
+            if (rssi == null || rssi === '' || rssi === 'None') return '';
+            const val = Number(rssi);
+            if (!Number.isFinite(val)) return '';
+            // Map -100..-30 to 0..100%
+            const pct = Math.max(0, Math.min(100, ((val + 100) / 70) * 100));
+            const color = pct > 60 ? '#10b981' : pct > 30 ? '#f59e0b' : '#ef4444';
+            return '<span class="rssi-bar" style="width:' + pct + 'px;background:' + color + '"></span>' + val + ' dBm';
+        }
+
+        // ---- Battery display ----
+        function batteryDisplay(raw) {
+            if (raw == null || raw === '') return 'N/A';
+            const v = Number(raw);
+            if (!Number.isFinite(v)) return String(raw);
+            if (v >= 1.5 && v <= 4.0) {
+                const pct = Math.max(0, Math.min(100, ((v - 2.0) / 1.0) * 100));
+                return v.toFixed(2) + 'V (' + pct.toFixed(0) + '%)';
+            }
+            return Math.round(v) + '%';
+        }
+
+        // ---- Fetch Navixy Cloud ----
+        async function fetchNavixy() {
+            try {
+                const r = await fetch(NAVIXY_API);
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const data = await r.json();
+                setStatus('navixy', true);
+                return data;
+            } catch(e) {
+                setStatus('navixy', false);
+                return { error: e.message };
+            }
+        }
+
+        // ---- Fetch Teltonika Eyebecons (FMC beacon positions from Navixy cloud :8767) ----
+        // Same endpoint as Navixy but we only use ble_positions (FMC GPS, different from RUTX11)
+        async function fetchTeltonika() {
+            try {
+                const r = await fetch(NAVIXY_API);
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const data = await r.json();
+                setStatus('teltonika', true);
+                // Return only ble_positions wrapped as expected by renderBeaconPanel
+                return { ble_positions: data.ble_positions || {}, rows: [] };
+            } catch(e) {
+                setStatus('teltonika', false);
+                return { error: e.message };
+            }
+        }
+
+        // ---- Fetch RUTX11 Broker Direct ----
+        async function fetchBroker() {
+            try {
+                const r = await fetch(BROKER_API);
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const data = await r.json();
+                setStatus('broker', true);
+                return data;
+            } catch(e) {
+                setStatus('broker', false);
+                return { error: e.message };
+            }
+        }
+
+        function setStatus(source, online) {
+            const el = document.getElementById(source + '-status');
+            const txt = document.getElementById(source + '-status-text');
+            el.className = 'status-item ' + (online ? 'online' : 'offline');
+            txt.className = 'status-value ' + (online ? 'online' : 'offline');
+            txt.textContent = online ? '\u2713 Online' : '\u2717 Offline';
+        }
+
+        // ---- Render LEFT: Navixy Cloud (full trackers + beacons) ----
+        function renderNavixy(data) {
+            const c = document.getElementById('navixy-content');
+            if (data.error) { c.innerHTML = '<div class="error-message">' + data.error + '</div>'; return; }
+            let h = '';
+
+            // Trackers
+            const rows = data.rows || [];
+            if (rows.length) {
+                h += '<div class="data-section"><div class="section-title">Trackers (' + rows.length + ')</div>';
+                rows.forEach(function(t) {
+                    h += '<div class="tracker-card">';
+                    h += '<div class="card-title">' + (t.label || t.imei || 'Unknown') + '</div>';
+                    h += '<div class="card-row"><span class="card-label">IMEI:</span><span class="card-value">' + (t.imei || 'N/A') + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Position:</span><span class="card-value">' + (t.lat || 'N/A') + ', ' + (t.lng || 'N/A') + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Speed:</span><span class="card-value">' + (t.speed || 0) + ' km/h</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Last Update:</span><span class="card-value">' + (t.last_update || 'N/A') + '</span></div>';
+
+                    // Embedded beacons from Navixy tracker
+                    if (t.beacons && t.beacons.length) {
+                        h += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #404040;">';
+                        h += '<div style="color:#10b981;font-size:0.85em;margin-bottom:4px;">BLE Beacons (' + t.beacons.length + '):</div>';
+                        t.beacons.forEach(function(b) {
+                            var mac = (b.mac || '').toLowerCase();
+                            var known = KNOWN_BEACONS[mac] || {};
+                            h += '<div style="font-size:0.82em;color:#9ca3af;padding:2px 0;">';
+                            h += (known.name || b.name || mac) + ' | ' + mac + ' | Bat: ' + batteryDisplay(b.battery);
+                            h += '</div>';
+                        });
+                        h += '</div>';
+                    }
+                    h += '</div>';
+                });
+                h += '</div>';
+            }
+
+            // BLE Positions from Navixy
+            var blePos = data.ble_positions || {};
+            var bleKeys = Object.keys(blePos);
+            if (bleKeys.length) {
+                h += '<div class="data-section"><div class="section-title">BLE Positions (' + bleKeys.length + ')</div>';
+                bleKeys.forEach(function(mac) {
+                    var b = blePos[mac];
+                    var known = KNOWN_BEACONS[mac.toLowerCase()] || {};
+                    var stale = isStale(b.last_update, 300);
+                    h += '<div class="ble-card' + (stale ? ' stale' : '') + '">';
+                    h += '<div class="card-title">' + (b.name || known.name || mac) + '</div>';
+                    h += '<div class="card-row"><span class="card-label">MAC:</span><span class="card-value">' + mac + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Category:</span><span class="card-value">' + (b.category || known.category || 'N/A') + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Location:</span><span class="card-value">' + (b.lat || 'N/A') + ', ' + (b.lng || 'N/A') + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Battery:</span><span class="card-value">' + batteryDisplay(b.battery) + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Last Seen:</span><span class="card-value ' + (stale ? 'stale' : 'fresh') + '">' + timeAgo(b.last_update) + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Seen By:</span><span class="card-value">' + (b.last_tracker_label || b.tracker_label || b.last_tracker_id || 'N/A') + '</span></div>';
+                    h += '</div>';
+                });
+                h += '</div>';
+            }
+
+            c.innerHTML = h || '<div class="no-data">No data</div>';
+            document.getElementById('navixy-timestamp').textContent = new Date().toLocaleTimeString();
+        }
+
+        // ---- Render beacon-only panel (MIDDLE and RIGHT) ----
+        function renderBeaconPanel(data, containerId, timestampId, source) {
+            var c = document.getElementById(containerId);
+            if (data.error) { c.innerHTML = '<div class="error-message">' + data.error + '</div>'; return; }
+            var h = '';
+
+            var blePos = data.ble_positions || {};
+            var bleKeys = Object.keys(blePos);
+
+            // Show tracker info briefly if available
+            var trackRows = data.rows || [];
+            if (trackRows.length) {
+                h += '<div class="data-section"><div class="section-title">Trackers (' + trackRows.length + ')</div>';
+                trackRows.forEach(function(t) {
+                    h += '<div class="tracker-card" style="padding:8px;">';
+                    h += '<div class="card-title" style="font-size:0.9em;">' + (t.label || t.imei || 'Unknown') + '</div>';
+                    h += '<div class="card-row"><span class="card-label">Position:</span><span class="card-value">' + (t.lat || 'N/A') + ', ' + (t.lng || 'N/A') + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Last Update:</span><span class="card-value">' + (t.last_update || t.timestamp || 'N/A') + '</span></div>';
+                    h += '</div>';
+                });
+                h += '</div>';
+            }
+
+            // Main: Beacon cards
+            if (bleKeys.length) {
+                h += '<div class="data-section"><div class="section-title">Beacons (' + bleKeys.length + ')</div>';
+                bleKeys.forEach(function(mac) {
+                    var b = blePos[mac];
+                    var known = KNOWN_BEACONS[mac.toLowerCase()] || {};
+                    var stale = isStale(b.last_update, 300);
+                    h += '<div class="ble-card' + (stale ? ' stale' : '') + '">';
+                    h += '<div class="card-title">' + (b.name || known.name || mac) + '</div>';
+                    h += '<div class="card-row"><span class="card-label">Asset / MAC:</span><span class="card-value">' + mac + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Category:</span><span class="card-value">' + (b.category || known.category || 'N/A') + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Location:</span><span class="card-value">' + (b.lat != null ? Number(b.lat).toFixed(6) : 'N/A') + ', ' + (b.lng != null ? Number(b.lng).toFixed(6) : 'N/A') + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Battery:</span><span class="card-value">' + batteryDisplay(b.battery) + '</span></div>';
+                    if (b.rssi != null && b.rssi !== '' && b.rssi !== 'None') {
+                        h += '<div class="card-row"><span class="card-label">RSSI:</span><span class="card-value">' + rssiBar(b.rssi) + '</span></div>';
+                    }
+                    if (b.is_paired) {
+                        h += '<div class="card-row"><span class="card-label">Paired:</span><span class="card-value fresh">' + (b.pairing_duration || b.pairing_duration_sec || 0) + 's</span></div>';
+                    }
+                    h += '<div class="card-row"><span class="card-label">Last Seen:</span><span class="card-value ' + (stale ? 'stale' : 'fresh') + '">' + timeAgo(b.last_update) + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Seen By:</span><span class="card-value">' + (b.last_tracker_label || b.tracker_label || b.last_tracker_id || 'N/A') + '</span></div>';
+                    h += '</div>';
+                });
+                h += '</div>';
+            } else {
+                h += '<div class="no-data">No beacon data from ' + source + '</div>';
+            }
+
+            c.innerHTML = h;
+            document.getElementById(timestampId).textContent = new Date().toLocaleTimeString();
+        }
+
+        // ---- Comparison table: all 3 sources side-by-side per beacon ----
+        function renderComparison(navixyData, teltonikaData, brokerData) {
+            var c = document.getElementById('comparison-content');
+            if (navixyData.error && teltonikaData.error && brokerData.error) {
+                c.innerHTML = '<div class="no-data">All sources offline</div>';
+                return;
+            }
+
+            // Collect all beacon MACs across all sources
+            var allMacs = {};
+            function collectBle(data, src) {
+                if (!data || data.error) return;
+                var bp = data.ble_positions || {};
+                Object.keys(bp).forEach(function(mac) {
+                    var key = mac.toLowerCase();
+                    if (!allMacs[key]) allMacs[key] = {};
+                    allMacs[key][src] = bp[mac];
+                });
+            }
+            collectBle(navixyData, 'navixy');
+            collectBle(teltonikaData, 'teltonika');
+            collectBle(brokerData, 'broker');
+
+            var macs = Object.keys(allMacs).sort();
+            if (!macs.length) {
+                c.innerHTML = '<div class="no-data">No beacon data to compare</div>';
+                return;
+            }
+
+            var h = '<table class="comp-table">';
+            h += '<tr><th>Beacon</th><th>Field</th><th style="color:#3b82f6">Navixy Trackers</th><th style="color:#f59e0b">Teltonika Eyebecons</th><th style="color:#10b981">BT Eyebecons</th></tr>';
+
+            macs.forEach(function(mac) {
+                var sources = allMacs[mac];
+                var known = KNOWN_BEACONS[mac] || {};
+                var name = '--';
+                ['broker','teltonika','navixy'].forEach(function(s) {
+                    if (sources[s] && (sources[s].name || known.name)) name = sources[s].name || known.name;
+                });
+
+                var fields = [
+                    { label: 'Location', fn: function(b) { return b ? (Number(b.lat).toFixed(6) + ', ' + Number(b.lng).toFixed(6)) : '--'; } },
+                    { label: 'Battery', fn: function(b) { return b ? batteryDisplay(b.battery) : '--'; } },
+                    { label: 'RSSI', fn: function(b) { return (b && b.rssi != null && b.rssi !== 'None') ? b.rssi + ' dBm' : '--'; } },
+                    { label: 'Last Seen', fn: function(b) { return b ? timeAgo(b.last_update) : '--'; } },
+                    { label: 'Seen By', fn: function(b) { return b ? (b.last_tracker_label || b.tracker_label || b.last_tracker_id || '--') : '--'; } },
+                ];
+
+                fields.forEach(function(f, i) {
+                    h += '<tr>';
+                    if (i === 0) {
+                        h += '<td rowspan="' + fields.length + '" style="font-weight:bold;color:#f59e0b;vertical-align:top;border-right:1px solid #404040;padding-right:10px;">' + name + '<br><span style="font-size:0.75em;color:#9ca3af;">' + mac + '</span></td>';
+                    }
+                    h += '<td style="color:#9ca3af;">' + f.label + '</td>';
+
+                    var nVal = f.fn(sources.navixy);
+                    var tVal = f.fn(sources.teltonika);
+                    var bVal = f.fn(sources.broker);
+
+                    // Highlight differences
+                    var allSame = (nVal === tVal && tVal === bVal);
+                    h += '<td class="' + (allSame ? 'match' : (nVal !== '--' ? '' : 'diff')) + '">' + nVal + '</td>';
+                    h += '<td class="' + (allSame ? 'match' : (tVal !== '--' ? '' : 'diff')) + '">' + tVal + '</td>';
+                    h += '<td class="' + (allSame ? 'match' : (bVal !== '--' ? '' : 'diff')) + '">' + bVal + '</td>';
+                    h += '</tr>';
+                });
+
+                // Separator row
+                h += '<tr><td colspan="5" style="border-bottom:2px solid #404040;padding:0;"></td></tr>';
+            });
+
+            h += '</table>';
+            c.innerHTML = h;
+        }
+
+        // ---- Main fetch all ----
+        async function fetchAllData() {
+            var results = await Promise.all([fetchNavixy(), fetchTeltonika(), fetchBroker()]);
+            var navixyData    = results[0];
+            var teltonikaData = results[1];
+            var brokerData    = results[2];
+
+            renderNavixy(navixyData);
+            renderBeaconPanel(teltonikaData, 'teltonika-content', 'teltonika-timestamp', 'Teltonika Eyebecons');
+            renderBeaconPanel(brokerData, 'broker-content', 'broker-timestamp', 'BT Eyebecons');
+            renderComparison(navixyData, teltonikaData, brokerData);
+
+            document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+        }
+
+        function startAutoRefresh() {
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            fetchAllData();
+            autoRefreshInterval = setInterval(fetchAllData, 5000);
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
+        }
+
+        // Initial load
+        fetchAllData();
+    </script>
+</body>
+</html>
