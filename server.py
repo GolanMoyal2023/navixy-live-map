@@ -27,6 +27,7 @@ API_BASE_URL = os.environ.get("NAVIXY_BASE_URL", "https://api.navixy.com/v2")
 API_HASH = os.environ.get("NAVIXY_API_HASH") or "f038d4c96bfc683cdc52337824f7e5f0"
 
 POLL_TIMEOUT_SECONDS = int(os.environ.get("NAVIXY_TIMEOUT", "10"))
+BROKER_DATA_URL = os.environ.get("BROKER_DATA_URL", "http://127.0.0.1:8768/data")
 
 app = Flask(__name__)
 
@@ -35,7 +36,7 @@ app = Flask(__name__)
 def add_cors_headers(response):  # type: ignore[override]
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, ngrok-skip-browser-warning"
     return response
 
 
@@ -46,6 +47,32 @@ def _api_call(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     response = requests.post(url, data=data, timeout=POLL_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response.json()
+
+
+def _fetch_broker_ble_positions() -> Dict[str, Dict[str, Any]]:
+    """
+    Pull BLE positions from local broker and normalize keys.
+    This keeps GitHub/public map enriched even when SQL BLE cache is stale.
+    """
+    try:
+        resp = requests.get(BROKER_DATA_URL, timeout=3)
+        resp.raise_for_status()
+        payload = resp.json()
+        raw_positions = payload.get("ble_positions") or {}
+        normalized: Dict[str, Dict[str, Any]] = {}
+        for mac, pos in raw_positions.items():
+            if not isinstance(pos, dict):
+                continue
+            entry = dict(pos)
+            # Normalize common timestamp aliases used by broker/db pipelines
+            last_seen = entry.get("last_seen") or entry.get("last_update") or entry.get("updated_at")
+            if last_seen:
+                entry["last_seen"] = last_seen
+                entry["last_update"] = entry.get("last_update") or last_seen
+            normalized[str(mac).lower()] = entry
+        return normalized
+    except Exception:
+        return {}
 
 
 def _safe_get(state: Dict[str, Any], *keys: str) -> Any:
@@ -468,10 +495,21 @@ def data() -> Any:
         except:
             pass
 
+    # Enrich/override with live broker BLE payload when available.
+    # This preserves battery/RSSI/last_seen fields that are often missing from SQL cache.
+    broker_ble_positions = _fetch_broker_ble_positions()
+    merged_ble_positions: Dict[str, Dict[str, Any]] = {
+        str(k).lower(): (v if isinstance(v, dict) else {})
+        for k, v in (stored_ble_positions or {}).items()
+    }
+    for mac, broker_pos in broker_ble_positions.items():
+        existing = merged_ble_positions.get(mac, {})
+        merged_ble_positions[mac] = {**existing, **broker_pos}
+
     return jsonify({
         "success": True, 
         "rows": rows,
-        "ble_positions": stored_ble_positions,
+        "ble_positions": merged_ble_positions,
         "db_enabled": DB_ENABLED
     })
 
