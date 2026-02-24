@@ -1644,6 +1644,8 @@
       let activePopupId = null;
       let isRefreshing = false;
       let lastRows = [];
+      let lastGoodDirectPayload = null;
+      let lastGoodMotorizedPayload = null;
       const TABLE_COLUMNS = [
         { key: "gse", label: "GSE", value: (row) => formatLabel(row) },
         { key: "movement_status", label: "movement_status", value: (row) => formatFieldValue("movement_status", row.movement_status) },
@@ -2505,10 +2507,20 @@
           }
         }
       }
-      function dataFetch(url) {
-        // Keep requests "simple" (no custom headers) to avoid CORS preflight failures
-        // on public tunnels where Access-Control-Allow-Headers is restricted.
-        return fetch(url);
+      async function dataFetch(url) {
+        let lastErr = null;
+        for (let i = 0; i < 2; i++) {
+          try {
+            // Keep requests simple (no custom headers) to avoid CORS preflight failures.
+            const res = await fetch(url, { cache: "no-store" });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res;
+          } catch (e) {
+            lastErr = e;
+            await new Promise(r => setTimeout(r, 350));
+          }
+        }
+        throw lastErr || new Error("fetch failed");
       }
 
       async function loadData(options = {}) {
@@ -2532,11 +2544,19 @@
             ]);
             payloadNavixy = res1.status === "fulfilled" ? res1.value : null;
             payloadDirect = res2.status === "fulfilled" ? res2.value : null;
+            if (payloadNavixy) lastGoodMotorizedPayload = payloadNavixy;
+            if (payloadDirect && payloadDirect.ble_positions && Object.keys(payloadDirect.ble_positions).length > 0) {
+              lastGoodDirectPayload = payloadDirect;
+            }
             // If both sources are configured to the same URL, one transient fetch failure
             // should not force a false "broker offline" state.
             if (sameEndpoint) {
               if (!payloadNavixy && payloadDirect) payloadNavixy = payloadDirect;
               if (!payloadDirect && payloadNavixy) payloadDirect = payloadNavixy;
+            }
+            if (!payloadNavixy && lastGoodMotorizedPayload) payloadNavixy = lastGoodMotorizedPayload;
+            if ((!payloadDirect || !payloadDirect.ble_positions || Object.keys(payloadDirect.ble_positions).length === 0) && lastGoodDirectPayload) {
+              payloadDirect = lastGoodDirectPayload;
             }
             lastRows = (payloadNavixy && payloadNavixy.rows) ? payloadNavixy.rows.filter((r) => !isIgnoredTracker(r)) : [];
             if (payloadNavixy && payloadNavixy.ble_positions && Object.keys(blePositions).length === 0) {
