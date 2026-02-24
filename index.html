@@ -2506,8 +2506,9 @@
         }
       }
       function dataFetch(url) {
-        const opts = (url && url.indexOf("ngrok") !== -1) ? { headers: { "ngrok-skip-browser-warning": "true" } } : {};
-        return fetch(url, opts);
+        // Keep requests "simple" (no custom headers) to avoid CORS preflight failures
+        // on public tunnels where Access-Control-Allow-Headers is restricted.
+        return fetch(url);
       }
 
       async function loadData(options = {}) {
