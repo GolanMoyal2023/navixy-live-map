@@ -2627,9 +2627,14 @@
       }
       if (typeof location !== "undefined" && location.hostname && location.hostname.indexOf("github.io") !== -1) {
         fetch("api-url.json?t=" + Date.now()).then(function(r){ return r.ok ? r.json() : {}; }).then(function(j){
-          if (j && j.dataUrl) {
-            window.__NAVIXY_DATA_SOURCES.motorized_gse = j.dataUrl;
-            window.__NAVIXY_DATA_SOURCES.direct = j.dataUrl;
+          if (j) {
+            // Backward compatible:
+            // - legacy: { dataUrl }
+            // - split sources: { motorizedGseUrl, directUrl } (or dataSources object)
+            var motorized = j.motorizedGseUrl || j.motorized_gse || (j.dataSources && j.dataSources.motorized_gse) || j.dataUrl;
+            var direct = j.directUrl || j.direct_data_url || (j.dataSources && j.dataSources.direct) || j.dataUrl;
+            if (motorized) window.__NAVIXY_DATA_SOURCES.motorized_gse = motorized;
+            if (direct) window.__NAVIXY_DATA_SOURCES.direct = direct;
           }
           startDataPolling();
         }).catch(function(){ startDataPolling(); });
