@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Data Sources - Navixy Trackers | Teltonika Eyebecons | BT Eyebecons</title>
+    <title>Data Sources - Navixy API | Teltonika Broker (ngrok) | RUTX11 Direct</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -131,7 +131,7 @@
 <body>
     <div class="header">
         <h1>Data Sources - Beacon Behaviour Comparison</h1>
-        <p>Left: Navixy Trackers | Middle: Teltonika Eyebecons | Right: BT Eyebecons</p>
+        <p>Left: Navixy API (:8767) | Middle: Teltonika Broker (ngrok) | Right: RUTX11 Direct (:8768)</p>
     </div>
 
     <div class="controls">
@@ -146,11 +146,11 @@
             <div class="status-value" id="navixy-status-text">--</div>
         </div>
         <div class="status-item" id="teltonika-status">
-            <div class="status-label">Teltonika Eyebecons (:8767)</div>
+            <div class="status-label">Teltonika Broker (ngrok)</div>
             <div class="status-value" id="teltonika-status-text">--</div>
         </div>
         <div class="status-item" id="broker-status">
-            <div class="status-label">BT Eyebecons (:8768)</div>
+            <div class="status-label">RUTX11 Direct (:8768)</div>
             <div class="status-value" id="broker-status-text">--</div>
         </div>
         <div class="status-item">
@@ -169,19 +169,19 @@
             <div id="navixy-content"><div class="no-data">Loading...</div></div>
         </div>
 
-        <!-- MIDDLE: Teltonika Eyebecons (FMC beacon positions from Navixy cloud) -->
+        <!-- MIDDLE: Teltonika Broker (via ngrok tunnel to :8768) -->
         <div class="panel">
             <div class="panel-header">
-                <div class="panel-title ngrok">Teltonika Eyebecons</div>
+                <div class="panel-title ngrok">Teltonika Broker</div>
                 <div class="panel-timestamp" id="teltonika-timestamp">-</div>
             </div>
             <div id="teltonika-content"><div class="no-data">Loading...</div></div>
         </div>
 
-        <!-- RIGHT: BT Eyebecons -->
+        <!-- RIGHT: RUTX11 Eyebecons -->
         <div class="panel">
             <div class="panel-header">
-                <div class="panel-title broker">BT Eyebecons</div>
+                <div class="panel-title broker">RUTX11 Direct</div>
                 <div class="panel-timestamp" id="broker-timestamp">-</div>
             </div>
             <div id="broker-content"><div class="no-data">Loading...</div></div>
@@ -198,7 +198,25 @@
 
         // API endpoints
         const NAVIXY_API  = 'http://127.0.0.1:8767/data';  // Navixy cloud (FMC/OBD trackers)
-        const BROKER_API  = 'http://127.0.0.1:8768/data';  // RUTX11 broker (BLE beacons)
+        const BROKER_API  = 'http://127.0.0.1:8768/data';  // RUTX11 direct — separate device, own GPS
+        // Teltonika Broker via ngrok HTTPS tunnel → :8768
+        // Update this URL if ngrok restarts with a new subdomain
+        const NGROK_BROKER_URL = 'https://absently-dispensible-chanel.ngrok-free.dev/data';
+        let ngrokDataUrl = NGROK_BROKER_URL;
+
+        // ---- Try to auto-resolve ngrok URL (upgrades the hardcoded fallback) ----
+        async function resolveNgrokUrl() {
+            try {
+                const r = await fetch('http://127.0.0.1:4040/api/tunnels');
+                const d = await r.json();
+                for (var t of (d.tunnels || [])) {
+                    if (t.proto === 'https' || (t.public_url && t.public_url.startsWith('https'))) {
+                        ngrokDataUrl = t.public_url.replace(/\/$/, '') + '/data';
+                        return;
+                    }
+                }
+            } catch(e) { /* file:// can't reach ngrok API — use hardcoded URL */ }
+        }
 
         // Known beacon definitions (match index.html)
         const KNOWN_BEACONS = {
@@ -208,6 +226,19 @@
             "7cd9f407a2db": { name: "EyeBe4",     category: "Equipment" },
             "7cd9f4116ee7": { name: "Eysen2plus", category: "Safety" },
         };
+
+        // Known tracker name mapping (raw serial → friendly name)
+        const KNOWN_TRACKERS = {
+            "rutx1100xxxx": "RUTX11",
+            "rutx11:rutx1100xxxx": "RUTX11",
+            "rutx11": "RUTX11",
+            "rutx11:rutx11": "RUTX11",
+        };
+        function trackerDisplayName(raw) {
+            if (!raw || raw === '--') return '--';
+            var key = String(raw).toLowerCase();
+            return KNOWN_TRACKERS[key] || raw;
+        }
 
         // ---- Helper: format time ago ----
         function timeAgo(dateStr) {
@@ -239,6 +270,32 @@
             return '<span class="rssi-bar" style="width:' + pct + 'px;background:' + color + '"></span>' + val + ' dBm';
         }
 
+        // ---- Filter ble_positions by device source ----
+        // 'fmc'    → keep only beacons detected by FMC tracker (last_tracker_id is NOT rutx11:*)
+        // 'rutx11' → keep only beacons detected by RUTX11 (last_tracker_id starts with rutx11:)
+        function filterBleBySource(data, sourceType) {
+            if (!data || data.error || !data.ble_positions) return data;
+            var filtered = {};
+            var bp = data.ble_positions;
+            Object.keys(bp).forEach(function(mac) {
+                var entry = bp[mac];
+                var tid = String(entry.last_tracker_id || '').toLowerCase();
+                if (sourceType === 'fmc') {
+                    // FMC tracker: tracker_id is a numeric IMEI, NOT starting with "rutx11"
+                    // Skip entries with no tracker (unseen beacons)
+                    if (tid && !tid.startsWith('rutx11')) filtered[mac] = entry;
+                } else if (sourceType === 'rutx11') {
+                    // RUTX11: tracker_id starts with "rutx11:"
+                    if (tid.startsWith('rutx11')) filtered[mac] = entry;
+                }
+            });
+            // Return a copy with filtered ble_positions
+            var out = {};
+            for (var k in data) { out[k] = data[k]; }
+            out.ble_positions = filtered;
+            return out;
+        }
+
         // ---- Battery display ----
         function batteryDisplay(raw) {
             if (raw == null || raw === '') return 'N/A';
@@ -254,7 +311,7 @@
         // ---- Fetch Navixy Cloud ----
         async function fetchNavixy() {
             try {
-                const r = await fetch(NAVIXY_API);
+                const r = await fetch(NAVIXY_API + '?t=' + Date.now());
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 const data = await r.json();
                 setStatus('navixy', true);
@@ -265,26 +322,31 @@
             }
         }
 
-        // ---- Fetch Teltonika Eyebecons (FMC beacon positions from Navixy cloud :8767) ----
-        // Same endpoint as Navixy but we only use ble_positions (FMC GPS, different from RUTX11)
+        // ---- Fetch Teltonika Broker via ngrok ----
         async function fetchTeltonika() {
+            if (!ngrokDataUrl) {
+                setStatus('teltonika', false);
+                return { error: 'ngrok URL not resolved', _url: null };
+            }
             try {
-                const r = await fetch(NAVIXY_API);
+                const r = await fetch(ngrokDataUrl + '?t=' + Date.now(), {
+                    headers: { 'ngrok-skip-browser-warning': '1' }
+                });
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 const data = await r.json();
                 setStatus('teltonika', true);
-                // Return only ble_positions wrapped as expected by renderBeaconPanel
-                return { ble_positions: data.ble_positions || {}, rows: [] };
+                data._url = ngrokDataUrl;
+                return data;
             } catch(e) {
                 setStatus('teltonika', false);
-                return { error: e.message };
+                return { error: e.message, _url: ngrokDataUrl };
             }
         }
 
         // ---- Fetch RUTX11 Broker Direct ----
         async function fetchBroker() {
             try {
-                const r = await fetch(BROKER_API);
+                const r = await fetch(BROKER_API + '?t=' + Date.now());
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 const data = await r.json();
                 setStatus('broker', true);
@@ -355,7 +417,7 @@
                     h += '<div class="card-row"><span class="card-label">Location:</span><span class="card-value">' + (b.lat || 'N/A') + ', ' + (b.lng || 'N/A') + '</span></div>';
                     h += '<div class="card-row"><span class="card-label">Battery:</span><span class="card-value">' + batteryDisplay(b.battery) + '</span></div>';
                     h += '<div class="card-row"><span class="card-label">Last Seen:</span><span class="card-value ' + (stale ? 'stale' : 'fresh') + '">' + timeAgo(b.last_update) + '</span></div>';
-                    h += '<div class="card-row"><span class="card-label">Seen By:</span><span class="card-value">' + (b.last_tracker_label || b.tracker_label || b.last_tracker_id || 'N/A') + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Seen By:</span><span class="card-value">' + trackerDisplayName(b.last_tracker_label || b.tracker_label || b.last_tracker_id || 'N/A') + '</span></div>';
                     h += '</div>';
                 });
                 h += '</div>';
@@ -368,8 +430,12 @@
         // ---- Render beacon-only panel (MIDDLE and RIGHT) ----
         function renderBeaconPanel(data, containerId, timestampId, source) {
             var c = document.getElementById(containerId);
-            if (data.error) { c.innerHTML = '<div class="error-message">' + data.error + '</div>'; return; }
             var h = '';
+            // Show ngrok URL if present
+            if (data._url) {
+                h += '<div style="font-size:0.75em;color:#9ca3af;margin-bottom:8px;word-break:break-all;">' + data._url + '</div>';
+            }
+            if (data.error) { c.innerHTML = h + '<div class="error-message">' + data.error + '</div>'; return; }
 
             var blePos = data.ble_positions || {};
             var bleKeys = Object.keys(blePos);
@@ -408,7 +474,7 @@
                         h += '<div class="card-row"><span class="card-label">Paired:</span><span class="card-value fresh">' + (b.pairing_duration || b.pairing_duration_sec || 0) + 's</span></div>';
                     }
                     h += '<div class="card-row"><span class="card-label">Last Seen:</span><span class="card-value ' + (stale ? 'stale' : 'fresh') + '">' + timeAgo(b.last_update) + '</span></div>';
-                    h += '<div class="card-row"><span class="card-label">Seen By:</span><span class="card-value">' + (b.last_tracker_label || b.tracker_label || b.last_tracker_id || 'N/A') + '</span></div>';
+                    h += '<div class="card-row"><span class="card-label">Seen By:</span><span class="card-value">' + trackerDisplayName(b.last_tracker_label || b.tracker_label || b.last_tracker_id || 'N/A') + '</span></div>';
                     h += '</div>';
                 });
                 h += '</div>';
@@ -420,7 +486,19 @@
             document.getElementById(timestampId).textContent = new Date().toLocaleTimeString();
         }
 
-        // ---- Comparison table: all 3 sources side-by-side per beacon ----
+        // ---- Resolve authoritative position for a beacon ----
+        // RUTX11 only — no fallback. 3 channels are independent.
+        // RUTX11 on tractor = authoritative position source.
+        function resolveAuthority(sources) {
+            var b = sources.broker;
+            if (b && b.lat && b.lng) {
+                var fresh = !isStale(b.last_update, 300);
+                return { lat: b.lat, lng: b.lng, source: fresh ? 'RUTX11' : 'RUTX11 (stale)', time: b.last_update, rssi: b.rssi };
+            }
+            return null;
+        }
+
+        // ---- Comparison table: all 3 sources + authoritative "Real Location" ----
         function renderComparison(navixyData, teltonikaData, brokerData) {
             var c = document.getElementById('comparison-content');
             if (navixyData.error && teltonikaData.error && brokerData.error) {
@@ -450,7 +528,7 @@
             }
 
             var h = '<table class="comp-table">';
-            h += '<tr><th>Beacon</th><th>Field</th><th style="color:#3b82f6">Navixy Trackers</th><th style="color:#f59e0b">Teltonika Eyebecons</th><th style="color:#10b981">BT Eyebecons</th></tr>';
+            h += '<tr><th>Beacon</th><th>Field</th><th style="color:#3b82f6">Navixy API</th><th style="color:#f59e0b">Teltonika Broker</th><th style="color:#10b981">RUTX11 Direct</th></tr>';
 
             macs.forEach(function(mac) {
                 var sources = allMacs[mac];
@@ -465,13 +543,17 @@
                     { label: 'Battery', fn: function(b) { return b ? batteryDisplay(b.battery) : '--'; } },
                     { label: 'RSSI', fn: function(b) { return (b && b.rssi != null && b.rssi !== 'None') ? b.rssi + ' dBm' : '--'; } },
                     { label: 'Last Seen', fn: function(b) { return b ? timeAgo(b.last_update) : '--'; } },
-                    { label: 'Seen By', fn: function(b) { return b ? (b.last_tracker_label || b.tracker_label || b.last_tracker_id || '--') : '--'; } },
+                    { label: 'Seen By', fn: function(b) { return b ? trackerDisplayName(b.last_tracker_label || b.tracker_label || b.last_tracker_id || '--') : '--'; } },
                 ];
+
+                // Resolve authoritative position
+                var auth = resolveAuthority(sources);
+                var totalRows = fields.length + 1; // +1 for Real Location row
 
                 fields.forEach(function(f, i) {
                     h += '<tr>';
                     if (i === 0) {
-                        h += '<td rowspan="' + fields.length + '" style="font-weight:bold;color:#f59e0b;vertical-align:top;border-right:1px solid #404040;padding-right:10px;">' + name + '<br><span style="font-size:0.75em;color:#9ca3af;">' + mac + '</span></td>';
+                        h += '<td rowspan="' + totalRows + '" style="font-weight:bold;color:#f59e0b;vertical-align:top;border-right:1px solid #404040;padding-right:10px;">' + name + '<br><span style="font-size:0.75em;color:#9ca3af;">' + mac + '</span></td>';
                     }
                     h += '<td style="color:#9ca3af;">' + f.label + '</td>';
 
@@ -479,7 +561,6 @@
                     var tVal = f.fn(sources.teltonika);
                     var bVal = f.fn(sources.broker);
 
-                    // Highlight differences
                     var allSame = (nVal === tVal && tVal === bVal);
                     h += '<td class="' + (allSame ? 'match' : (nVal !== '--' ? '' : 'diff')) + '">' + nVal + '</td>';
                     h += '<td class="' + (allSame ? 'match' : (tVal !== '--' ? '' : 'diff')) + '">' + tVal + '</td>';
@@ -487,7 +568,21 @@
                     h += '</tr>';
                 });
 
-                // Separator row
+                // ★ Real Location row — authoritative answer for ground crew
+                h += '<tr style="background:#1a2e1a;border-top:2px solid #10b981;">';
+                h += '<td style="color:#10b981;font-weight:bold;">Real Location</td>';
+                if (auth) {
+                    var locStr = Number(auth.lat).toFixed(6) + ', ' + Number(auth.lng).toFixed(6);
+                    var staleTag = auth.source.indexOf('stale') !== -1 ? ' style="color:#f59e0b"' : '';
+                    h += '<td colspan="3" style="color:#10b981;font-weight:bold;font-size:1em;">';
+                    h += locStr + ' <span' + staleTag + ' style="font-size:0.8em;margin-left:8px;">(via ' + auth.source + ', ' + timeAgo(auth.time) + ')</span>';
+                    h += '</td>';
+                } else {
+                    h += '<td colspan="3" class="diff" style="font-weight:bold;">Unknown — no fresh data from any source</td>';
+                }
+                h += '</tr>';
+
+                // Separator
                 h += '<tr><td colspan="5" style="border-bottom:2px solid #404040;padding:0;"></td></tr>';
             });
 
@@ -502,10 +597,17 @@
             var teltonikaData = results[1];
             var brokerData    = results[2];
 
-            renderNavixy(navixyData);
-            renderBeaconPanel(teltonikaData, 'teltonika-content', 'teltonika-timestamp', 'Teltonika Eyebecons');
-            renderBeaconPanel(brokerData, 'broker-content', 'broker-timestamp', 'BT Eyebecons');
-            renderComparison(navixyData, teltonikaData, brokerData);
+            // Filter ALL columns: each source shows ONLY its own device data
+            // Left + Middle = FMC-detected only (exclude rutx11:* tracker IDs)
+            // Right = RUTX11-detected only (include only rutx11:* tracker IDs)
+            var navixyFiltered    = filterBleBySource(navixyData, 'fmc');
+            var teltonikaFiltered = filterBleBySource(teltonikaData, 'fmc');
+            var brokerFiltered    = filterBleBySource(brokerData, 'rutx11');
+
+            renderNavixy(navixyFiltered);
+            renderBeaconPanel(teltonikaFiltered, 'teltonika-content', 'teltonika-timestamp', 'Teltonika Broker (ngrok)');
+            renderBeaconPanel(brokerFiltered, 'broker-content', 'broker-timestamp', 'RUTX11 Direct (:8768)');
+            renderComparison(navixyFiltered, teltonikaFiltered, brokerFiltered);
 
             document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
         }
@@ -520,8 +622,8 @@
             if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
         }
 
-        // Initial load
-        fetchAllData();
+        // Initial load — resolve ngrok URL first, then fetch all data
+        resolveNgrokUrl().then(function() { fetchAllData(); });
     </script>
 </body>
 </html>
