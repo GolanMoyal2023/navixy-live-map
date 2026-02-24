@@ -62,6 +62,12 @@
         border-radius: 6px;
         border: 1px solid rgba(255, 255, 255, 0.2);
       }
+      .data-source-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 4px;
+      }
 
       .source-label {
         color: #9ca3af;
@@ -88,6 +94,20 @@
         background: #059669;
         border-color: #047857;
         color: #ffffff;
+      }
+      .source-action-btn {
+        background: #2563eb;
+        color: #ffffff;
+        border: 1px solid #1d4ed8;
+        border-radius: 4px;
+        padding: 2px 8px;
+        cursor: pointer;
+        font-size: 11px;
+      }
+      .source-action-btn:hover { background: #1d4ed8; }
+      .source-action-btn:disabled {
+        opacity: 0.6;
+        cursor: wait;
       }
 
       /* Beacon cluster styling */
@@ -459,7 +479,7 @@
         margin-bottom: 2px;
       }
       .beacon-legend-toggle { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,0.1); }
-      .beacon-legend-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; user-select: none; }
+      .beacon-legend-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; -webkit-user-select: none; user-select: none; }
       .beacon-legend-label input[type="checkbox"] { cursor: pointer; }
       .options-box {
         top: 10px;
@@ -470,6 +490,32 @@
         z-index: 1000;
       }
       .options-box .legend-title { margin-bottom: 6px; font-size: 11px; }
+      .options-actions {
+        margin-top: 8px;
+        padding-top: 6px;
+        border-top: 1px solid rgba(0,0,0,0.1);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .options-action-btn {
+        background: #2563eb;
+        color: #fff;
+        border: 1px solid #1d4ed8;
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .options-action-btn:hover { background: #1d4ed8; }
+      .options-action-btn:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+      .options-action-status {
+        font-size: 10px;
+        color: #334155;
+      }
       .beacon-legend-row {
         display: flex;
         align-items: center;
@@ -494,6 +540,9 @@
       <button class="source-btn" data-source="motorized_gse" onclick="switchDataSource('motorized_gse')">Motorized GSE</button>
       <button class="source-btn" data-source="direct" onclick="switchDataSource('direct')">Direct</button>
       <button class="source-btn active" data-source="both" onclick="switchDataSource('both')">Both</button>
+      <div class="data-source-actions">
+        <button id="relinkBtnTop" type="button" class="source-action-btn" title="Force beacon re-link to nearest active tracker">Re-link</button>
+      </div>
     </div>
     <div id="mapView" class="view-panel active">
       <div id="map"></div>
@@ -503,6 +552,10 @@
           <input type="checkbox" id="toggleXGpsOptions" checked aria-label="X-GPS Object (Human Agent tracker)">
           <span style="color:#0ea5e9;font-size:14px">📍</span> X-GPS Object (Human Agent tracker)
         </label>
+        <div class="options-actions">
+          <button id="relinkBtn" type="button" class="options-action-btn" title="Force beacon re-link to live detecting tracker">Re-link</button>
+          <span id="relinkStatus" class="options-action-status"></span>
+        </div>
       </div>
       <div class="map-overlay">
         <span id="mapStatus">Loading...</span>
@@ -588,11 +641,14 @@
         }
       })();
       const DATA_SOURCES = window.__NAVIXY_DATA_SOURCES;
+      const DISABLED_BEACON_MACS = new Set([
+        "7cd9f4003536", // Eybe2plus2 (broken, should not be displayed)
+        "7cd9f406427b", // EyeBe3 (not present, hide from map)
+      ]);
       // Fallback when broker returns wrong/empty data – ALL AT HOME (near Skoda)
       const HOME_LAT = 32.3107, HOME_LNG = 34.9314;
       const DIRECT_BEACON_POSITIONS_FALLBACK = {
         "7cd9f407f95c": { lat: HOME_LAT, lng: HOME_LNG, name: "Eybe2plus1", category: "Towed Device", type: "eye_beacon", last_tracker_label: "Direct" },
-        "7cd9f4003536": { lat: HOME_LAT, lng: HOME_LNG, name: "Eybe2plus2", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
         "7cd9f406427b": { lat: HOME_LAT, lng: HOME_LNG, name: "EyeBe3", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
         "7cd9f407a2db": { lat: HOME_LAT, lng: HOME_LNG, name: "EyeBe4", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
         "7cd9f4116ee7": { lat: HOME_LAT, lng: HOME_LNG, name: "Eysen2plus", category: "Safety", type: "eye_sensor", last_tracker_label: "Direct" },
@@ -671,6 +727,7 @@
         "Vehicle": { shape: "hexagon", color: "#7c3aed", image: null },
         "Uncategorized": { shape: "circle", color: "#6b7280", image: null },
       };
+      const BLE_ALLOWED_TRACKER_TOKENS = ["skoda", "5032", "6074"];
 
       // Extract beacons from tracker data
       function extractBeaconsFromTrackers(rows) {
@@ -779,6 +836,10 @@
         return s.substring(0, 19);
       }
 
+      function isDisabledBeaconMac(mac) {
+        return DISABLED_BEACON_MACS.has(String(mac || "").toLowerCase());
+      }
+
       function beaconPopupHtml(beacon) {
         const typeInfo = BEACON_CATEGORIES[beacon.beaconType] || BEACON_CATEGORIES["default"];
         const catConfig = CATEGORY_CONFIG[beacon.category] || CATEGORY_CONFIG["Uncategorized"];
@@ -828,6 +889,8 @@
           headerIcon = `<span style="font-size:24px;color:white;text-shadow:0 1px 2px rgba(0,0,0,0.3)">${headerSymbol}</span>`;
         }
         
+        const lastSawText = formatLastSaw(beacon.lastSeenAt || beacon.lastUpdate);
+        const pairingSeconds = Math.max(0, Math.floor(Number(beacon.pairingDuration || 0)));
         return `
           <div class="beacon-popup">
             <div class="beacon-header" style="background:${catConfig.color};color:white;padding:8px 12px;margin:-12px -12px 10px -12px;border-radius:4px 4px 0 0;display:flex;align-items:center;gap:8px;">
@@ -837,6 +900,16 @@
                 <div style="font-size:11px;opacity:0.9">${beacon.name}</div>
               </div>
             </div>
+            <div class="beacon-row" style="font-weight:700;color:#334155;">Stationery Device Information</div>
+            <div class="beacon-row">
+              <span class="beacon-row-label">Category</span>
+              <span class="beacon-row-value">${beacon.category}</span>
+            </div>
+            <div class="beacon-row">
+              <span class="beacon-row-label">Stationery Name</span>
+              <span class="beacon-row-value">${beacon.name}</span>
+            </div>
+            <div class="beacon-row" style="font-weight:700;color:#334155;margin-top:6px;">HW</div>
             <div class="beacon-row">
               <span class="beacon-row-label">Type</span>
               <span class="beacon-row-value">${typeInfo.label}</span>
@@ -873,11 +946,12 @@
             <div class="beacon-host" style="background:#f3f4f6;padding:6px 8px;border-radius:4px;margin-top:8px;">
               <div style="font-weight:600;margin-bottom:4px;">📍 BLE Position Info</div>
               <div>Last set by: <strong>${beacon.lastSeenByTracker || beacon.hostTrackerLabel}</strong></div>
-              ${beacon.lastSeenAt || beacon.lastUpdate ? `<div>Last saw: <strong>${formatLastSaw(beacon.lastSeenAt || beacon.lastUpdate)}</strong></div>` : ""}
+              ${lastSawText ? `<div>Last saw: <strong>${lastSawText}</strong></div>` : ""}
+              <div>Last Location: <strong>${latStr}, ${lngStr}</strong></div>
               ${beacon.isPaired ?
-                `<div style="color:#059669;font-weight:600;">🔗 PAIRED (${beacon.pairingDuration}s) - Following tracker</div>` :
+                `<div style="color:#059669;font-weight:600;">🔗 PAIRED (${pairingSeconds}s) - Following tracker</div>` :
                 beacon.pairingDuration > 0 ?
-                `<div style="color:#f59e0b;font-weight:600;">⏳ Pairing... (${beacon.pairingDuration}s / 60s)</div>` :
+                `<div style="color:#f59e0b;font-weight:600;">⏳ Pairing... (${pairingSeconds}s / 60s)</div>` :
                 `<div style="color:#6b7280;">📍 Last known position</div>`
               }
               ${beacon.estimatedDistance != null
@@ -966,6 +1040,18 @@
         };
       }
 
+      function isAllowedBleTrackerLabel(labelOrId) {
+        const text = String(labelOrId || "").toLowerCase();
+        return BLE_ALLOWED_TRACKER_TOKENS.some((token) => text.includes(token));
+      }
+
+      function normalizeTrackerLabel(labelOrId) {
+        const text = String(labelOrId || "").trim();
+        if (!text) return "";
+        if (/skoda/i.test(text)) return "SKODA";
+        return text;
+      }
+
       // ===== MARKER SPREADING FOR OVERLAPPING TRACKER ICONS =====
       // Shared position group so trackers at same location spread in one circle (no stacking)
       const positionGroups = {};
@@ -997,18 +1083,30 @@
       // Priority: RUTX11 (tractor) > FMC/OBD (vehicles) > Navixy cloud (fallback)
       function updateBeaconMarkersFromSQL(blePositionsData, trackerRows) {
         const now = Date.now();
-        const macs = Object.keys(blePositionsData);
+        const macs = Object.keys(blePositionsData).filter((mac) => !isDisabledBeaconMac(mac));
 
         // Create tracker lookup for labels
         const trackerLookup = {};
         trackerRows.forEach(row => {
+          if (isXGpsHumanAgent(row)) return;
           trackerLookup[row.tracker_id] = { lat: row.lat, lng: row.lng, label: row.label };
           if (row.imei) trackerLookup[row.imei] = { lat: row.lat, lng: row.lng, label: row.label };
         });
+        const allowedTrackers = trackerRows
+          .filter((row) => !isXGpsHumanAgent(row))
+          .filter((row) => isAllowedBleTrackerLabel(row.label) || isAllowedBleTrackerLabel(row.tracker_id))
+          .map((row) => ({
+            id: row.tracker_id,
+            label: normalizeTrackerLabel(row.label || row.tracker_id),
+            lat: Number(row.lat),
+            lng: Number(row.lng),
+          }))
+          .filter((t) => Number.isFinite(t.lat) && Number.isFinite(t.lng));
 
         // Group beacons by detecting tracker for stable angle assignment
         const trackerBeaconGroups = {};
         Object.entries(blePositionsData).forEach(([mac, pos]) => {
+          if (isDisabledBeaconMac(mac)) return;
           const tid = pos.last_tracker_id || "unknown";
           if (!trackerBeaconGroups[tid]) trackerBeaconGroups[tid] = [];
           trackerBeaconGroups[tid].push(mac);
@@ -1020,6 +1118,7 @@
 
         // Update/create markers for each beacon with RSSI-based offset from detecting tracker
         Object.entries(blePositionsData).forEach(([mac, pos]) => {
+          if (isDisabledBeaconMac(mac)) return;
           const baseLat = Number(pos.lat);
           const baseLng = Number(pos.lng);
 
@@ -1048,9 +1147,28 @@
           const sn = knownInfo.sn || "";
 
           // Get tracker label
-          const trackerLabel = pos.last_tracker_label ||
-                               (trackerLookup[pos.last_tracker_id] ? trackerLookup[pos.last_tracker_id].label : pos.last_tracker_id) ||
-                               "Unknown";
+          let trackerLabel = pos.last_tracker_label ||
+                             (trackerLookup[pos.last_tracker_id] ? trackerLookup[pos.last_tracker_id].label : pos.last_tracker_id) ||
+                             "Unknown";
+          if (!isAllowedBleTrackerLabel(trackerLabel) && !isAllowedBleTrackerLabel(pos.last_tracker_id)) {
+            if (allowedTrackers.length) {
+              let nearest = allowedTrackers[0];
+              let minDistance = calculateDistance(baseLat, baseLng, nearest.lat, nearest.lng);
+              for (let i = 1; i < allowedTrackers.length; i++) {
+                const t = allowedTrackers[i];
+                const d = calculateDistance(baseLat, baseLng, t.lat, t.lng);
+                if (d < minDistance) {
+                  minDistance = d;
+                  nearest = t;
+                }
+              }
+              trackerLabel = nearest.label;
+            } else {
+              trackerLabel = "SKODA";
+            }
+          } else {
+            trackerLabel = normalizeTrackerLabel(trackerLabel);
+          }
 
           const beacon = {
             mac,
@@ -1098,6 +1216,12 @@
           }
         });
 
+        Object.keys(beaconMarkers).forEach((mac) => {
+          if (isDisabledBeaconMac(mac)) {
+            beaconLayer.removeLayer(beaconMarkers[mac]);
+            delete beaconMarkers[mac];
+          }
+        });
         console.log(`[BLE] Total beacon markers: ${Object.keys(beaconMarkers).length}`);
       }
 
@@ -1433,6 +1557,9 @@
       const iconCache = new Map();
       const lastPositions = new Map();
       const clearButton = document.getElementById("clearPopup");
+      const relinkButton = document.getElementById("relinkBtn");
+      const relinkButtonTop = document.getElementById("relinkBtnTop");
+      const relinkStatus = document.getElementById("relinkStatus");
       const debugOverlay = document.getElementById("debugOverlay");
       const legendOverlay = document.getElementById("legendOverlay");
 
@@ -1441,6 +1568,29 @@
           Object.values(markers).forEach((marker) => marker.closePopup());
           activePopupId = null;
         });
+      }
+
+      function setRelinkUi(isBusy, text) {
+        if (relinkButton) relinkButton.disabled = !!isBusy;
+        if (relinkButtonTop) relinkButtonTop.disabled = !!isBusy;
+        if (relinkStatus) relinkStatus.textContent = text || "";
+      }
+
+      function isIgnoredTracker(rowOrId, maybeLabel) {
+        const id = typeof rowOrId === "object" ? String(rowOrId?.tracker_id || "") : String(rowOrId || "");
+        const label = typeof rowOrId === "object" ? String(rowOrId?.label || "") : String(maybeLabel || "");
+        const s = `${id} ${label}`.toLowerCase();
+        return s.includes("rutx11");
+      }
+
+      function clearBeaconRuntimeState() {
+        Object.keys(blePositions).forEach((k) => delete blePositions[k]);
+        Object.keys(blePairingTracker).forEach((k) => delete blePairingTracker[k]);
+        Object.keys(blePairingStart).forEach((k) => delete blePairingStart[k]);
+        Object.keys(beaconLastSeen).forEach((k) => delete beaconLastSeen[k]);
+        Object.keys(beaconRssiSmoothed).forEach((k) => delete beaconRssiSmoothed[k]);
+        beaconLayer.clearLayers();
+        Object.keys(beaconMarkers).forEach((k) => delete beaconMarkers[k]);
       }
 
       const viewTabs = document.querySelectorAll(".view-tab");
@@ -1892,7 +2042,7 @@
       function isXGpsHumanAgent(row) {
         const label = String(row.label || row.tracker_id || "").toLowerCase().trim();
         if (/^skoda$/.test(label)) return false;
-        return /golan-x-gps|x-gps\b/.test(label);
+        return /golan[\s_-]*x[\s_-]*gps|x[\s_-]*gps\b|iphone|ios/.test(label);
       }
 
       function updateMarkers(rows) {
@@ -1903,6 +2053,7 @@
         const xgpsSeen = new Set();
 
         rows.forEach((row) => {
+          if (isIgnoredTracker(row)) return;
           const lat = Number(row.lat);
           const lng = Number(row.lng);
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
@@ -2001,7 +2152,8 @@
         const statusEl = document.getElementById("mapStatus");
         const debugEl = document.getElementById("mapDebug");
         if (statusEl) {
-          statusEl.textContent = `Trackers: ${rows.length} | Markers: ${bounds.length}`;
+          const visibleTrackers = rows.filter((r) => !isIgnoredTracker(r)).length;
+          statusEl.textContent = `Trackers: ${visibleTrackers} | Markers: ${bounds.length}`;
         }
         if (debugEl) {
           const first = rows.find((row) => Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lng)));
@@ -2052,8 +2204,10 @@
         }
       }
       
-      function mergeBeaconsFromRows(combinedBle, rows) {
+      function mergeBeaconsFromRows(combinedBle, rows, forceRelink) {
         rows.forEach(row => {
+          if (isIgnoredTracker(row)) return;
+          if (isXGpsHumanAgent(row)) return;
           if (!row.beacons || !Array.isArray(row.beacons)) return;
           const lat = Number(row.lat);
           const lng = Number(row.lng);
@@ -2061,9 +2215,10 @@
           row.beacons.forEach(beacon => {
             const mac = (beacon.mac || "").toLowerCase();
             if (!mac) return;
+            if (isDisabledBeaconMac(mac)) return;
             const existing = combinedBle[mac];
             const hasStored = existing && Number.isFinite(Number(existing.lat)) && Number.isFinite(Number(existing.lng));
-            if (hasStored) return;
+            if (hasStored && !forceRelink) return;
             const known = KNOWN_BEACONS[mac] || KNOWN_BEACONS[mac.toUpperCase()] || {};
             const fromRow = {
               lat, lng,
@@ -2077,12 +2232,70 @@
             };
             // Beacon data (battery, last_update, etc.) comes only from broker; keep broker fields when present
             if (existing && (existing.battery != null || existing.last_update != null)) {
-              combinedBle[mac] = { ...fromRow, battery: existing.battery, last_update: existing.last_update || fromRow.last_update, last_tracker_id: existing.last_tracker_id ?? fromRow.last_tracker_id, last_tracker_label: existing.last_tracker_label || fromRow.last_tracker_label, is_paired: existing.is_paired, pairing_duration: existing.pairing_duration };
+              combinedBle[mac] = {
+                ...fromRow,
+                battery: existing.battery,
+                last_update: existing.last_update || fromRow.last_update,
+                last_tracker_id: forceRelink ? fromRow.last_tracker_id : (existing.last_tracker_id ?? fromRow.last_tracker_id),
+                last_tracker_label: forceRelink ? fromRow.last_tracker_label : (existing.last_tracker_label || fromRow.last_tracker_label),
+                is_paired: existing.is_paired,
+                pairing_duration: existing.pairing_duration
+              };
             } else {
               combinedBle[mac] = fromRow;
             }
           });
         });
+      }
+
+      function sanitizeBeaconPositions(combinedBle, trackerRows, options = {}) {
+        const forceAllToNearestTracker = !!options.forceAllToNearestTracker;
+        const activeTrackers = (trackerRows || [])
+          .filter((row) => !isIgnoredTracker(row))
+          .filter((row) => !isXGpsHumanAgent(row))
+          .map((row) => ({
+            id: row.tracker_id,
+            label: row.label || String(row.tracker_id),
+            lat: Number(row.lat),
+            lng: Number(row.lng),
+          }))
+          .filter((t) => Number.isFinite(t.lat) && Number.isFinite(t.lng));
+
+        if (!activeTrackers.length) return combinedBle;
+
+        const maxAllowedMeters = 2000;
+        Object.keys(combinedBle).forEach((mac) => {
+          if (isDisabledBeaconMac(mac)) {
+            delete combinedBle[mac];
+            return;
+          }
+          const pos = combinedBle[mac] || {};
+          const lat = Number(pos.lat);
+          const lng = Number(pos.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+          const ignoredTracker = isIgnoredTracker(pos.last_tracker_id, pos.last_tracker_label);
+          let nearest = null;
+          let nearestDistance = Infinity;
+          activeTrackers.forEach((t) => {
+            const d = calculateDistance(lat, lng, t.lat, t.lng);
+            if (d < nearestDistance) {
+              nearestDistance = d;
+              nearest = t;
+            }
+          });
+          if (!nearest) return;
+          if (forceAllToNearestTracker || ignoredTracker || nearestDistance > maxAllowedMeters) {
+            combinedBle[mac] = {
+              ...pos,
+              lat: nearest.lat,
+              lng: nearest.lng,
+              last_tracker_id: nearest.id,
+              last_tracker_label: nearest.label,
+              last_update: new Date().toISOString(),
+            };
+          }
+        });
+        return combinedBle;
       }
 
       let loadInProgress = false;
@@ -2105,10 +2318,12 @@
         return fetch(url, opts);
       }
 
-      async function loadData() {
+      async function loadData(options = {}) {
         if (loadInProgress) return;
         loadInProgress = true;
+        const forceRelink = !!options.forceRelink;
         if (!hasLoadedOnce) setStatus("Loading…");
+        if (forceRelink) setRelinkUi(true, "Relinking...");
         try {
           Object.keys(positionGroups).forEach(key => delete positionGroups[key]);
           let payloadNavixy = null;
@@ -2121,7 +2336,7 @@
             ]);
             payloadNavixy = res1.status === "fulfilled" ? res1.value : null;
             payloadDirect = res2.status === "fulfilled" ? res2.value : null;
-            lastRows = (payloadNavixy && payloadNavixy.rows) ? payloadNavixy.rows : [];
+            lastRows = (payloadNavixy && payloadNavixy.rows) ? payloadNavixy.rows.filter((r) => !isIgnoredTracker(r)) : [];
             if (payloadNavixy && payloadNavixy.ble_positions && Object.keys(blePositions).length === 0) {
               Object.entries(payloadNavixy.ble_positions).forEach(([mac, pos]) => {
                 blePositions[mac] = { lat: pos.lat, lng: pos.lng, lastTracker: pos.last_tracker_id, lastTrackerLabel: pos.last_tracker_label || "Unknown", lastUpdate: pos.last_update, isPaired: pos.is_paired };
@@ -2143,7 +2358,12 @@
                 }
               });
             }
-            mergeBeaconsFromRows(combinedBle, lastRows);
+            const directRows = (payloadDirect && payloadDirect.rows) ? payloadDirect.rows : [];
+            mergeBeaconsFromRows(combinedBle, directRows, forceRelink);
+            mergeBeaconsFromRows(combinedBle, lastRows, forceRelink);
+            sanitizeBeaconPositions(combinedBle, lastRows, {
+              forceAllToNearestTracker: forceRelink || directRows.length === 0
+            });
             updateMarkers(lastRows);
             renderTable(lastRows);
             updateBeaconMarkersFromSQL(combinedBle, lastRows);
@@ -2159,7 +2379,11 @@
             const fromBroker = (payloadDirect && payloadDirect.ble_positions) ? payloadDirect.ble_positions : {};
             const combinedBle = { ...DIRECT_BEACON_POSITIONS_FALLBACK };
             Object.assign(combinedBle, fromBroker);
-            mergeBeaconsFromRows(combinedBle, (payloadDirect && payloadDirect.rows) ? payloadDirect.rows : []);
+            const directRows = (payloadDirect && payloadDirect.rows) ? payloadDirect.rows.filter((r) => !isIgnoredTracker(r)) : [];
+            mergeBeaconsFromRows(combinedBle, directRows, forceRelink);
+            sanitizeBeaconPositions(combinedBle, directRows, {
+              forceAllToNearestTracker: forceRelink || directRows.length === 0
+            });
             updateMarkers([]);
             renderTable([]);
             updateBeaconMarkersFromSQL(combinedBle, []);
@@ -2171,14 +2395,17 @@
             const response = await dataFetch(DATA_SOURCES.motorized_gse);
             if (!response.ok) throw new Error("fetch failed");
             payloadNavixy = await response.json();
-            lastRows = payloadNavixy.rows || [];
+            lastRows = (payloadNavixy.rows || []).filter((r) => !isIgnoredTracker(r));
             if (payloadNavixy.ble_positions && Object.keys(blePositions).length === 0) {
               Object.entries(payloadNavixy.ble_positions).forEach(([mac, pos]) => {
                 blePositions[mac] = { lat: pos.lat, lng: pos.lng, lastTracker: pos.last_tracker_id, lastTrackerLabel: pos.last_tracker_label || "Unknown", lastUpdate: pos.last_update, isPaired: pos.is_paired };
               });
             }
             const combinedBle = { ...(payloadNavixy.ble_positions || {}) };
-            mergeBeaconsFromRows(combinedBle, lastRows);
+            mergeBeaconsFromRows(combinedBle, lastRows, forceRelink);
+            sanitizeBeaconPositions(combinedBle, lastRows, {
+              forceAllToNearestTracker: forceRelink
+            });
             updateMarkers(lastRows);
             renderTable(lastRows);
             updateBeaconMarkersFromSQL(combinedBle, lastRows);
@@ -2192,6 +2419,12 @@
           else setStatus("Motorized GSE: data server unavailable", false);
         } finally {
           loadInProgress = false;
+          if (forceRelink) setRelinkUi(false, "Done");
+          if (forceRelink && relinkStatus) {
+            setTimeout(() => {
+              if (!loadInProgress) relinkStatus.textContent = "";
+            }, 2500);
+          }
         }
       }
 
@@ -2226,6 +2459,16 @@
       }
       document.getElementById("toggleXGpsOptions")?.addEventListener("change", function () { setXGpsVisible(this.checked); });
       document.getElementById("toggleXGps")?.addEventListener("change", function () { setXGpsVisible(this.checked); });
+      relinkButton?.addEventListener("click", async function () {
+        if (loadInProgress) return;
+        clearBeaconRuntimeState();
+        await loadData({ forceRelink: true });
+      });
+      relinkButtonTop?.addEventListener("click", async function () {
+        if (loadInProgress) return;
+        clearBeaconRuntimeState();
+        await loadData({ forceRelink: true });
+      });
 
       fetch("llbg_layers.geojson")
         .then((res) => res.json())
