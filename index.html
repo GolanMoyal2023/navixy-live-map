@@ -1331,7 +1331,7 @@
             sn,
             lat: baseLat, // Show tracker anchor position in popup
             lng: baseLng,
-            battery: (pos.battery != null ? pos.battery : pos.battery_level),
+            battery: (pos.battery != null ? pos.battery : (pos.battery_level != null ? pos.battery_level : pos.battery_percent)),
             isPaired: isFollowingTracker,
             pairingDuration: pairingSecondsRaw,
             lastUpdate: pos.last_update || pos.last_seen || pos.updated_at || pos.updated,
@@ -2413,6 +2413,8 @@
               last_tracker_label: row.label || String(row.tracker_id),
               last_update: new Date().toISOString(),
               last_seen: new Date().toISOString(),
+              battery: (beacon.battery != null ? beacon.battery : beacon.battery_percent),
+              rssi: beacon.rssi,
               is_paired: false,
             };
             // Beacon data (battery, last_update, etc.) comes only from broker; keep broker fields when present
@@ -2422,7 +2424,7 @@
                 battery: existing.battery != null ? existing.battery : existing.battery_level,
                 last_update: existing.last_update || fromRow.last_update,
                 last_seen: existing.last_seen || existing.last_update || fromRow.last_seen,
-                rssi: existing.rssi,
+                rssi: existing.rssi != null ? existing.rssi : fromRow.rssi,
                 last_tracker_id: forceRelink ? fromRow.last_tracker_id : (existing.last_tracker_id ?? fromRow.last_tracker_id),
                 last_tracker_label: forceRelink ? fromRow.last_tracker_label : (existing.last_tracker_label || fromRow.last_tracker_label),
                 is_paired: existing.is_paired,
