@@ -2522,12 +2522,21 @@
           let payloadDirect = null;
 
           if (currentDataSource === "both") {
+            const srcMotorized = String(DATA_SOURCES.motorized_gse || "").replace(/\/+$/, "");
+            const srcDirect = String(DATA_SOURCES.direct || "").replace(/\/+$/, "");
+            const sameEndpoint = srcMotorized && srcDirect && srcMotorized === srcDirect;
             const [res1, res2] = await Promise.allSettled([
               dataFetch(DATA_SOURCES.motorized_gse).then(r => r.ok ? r.json() : Promise.reject(new Error("8767 failed"))),
               dataFetch(DATA_SOURCES.direct).then(r => r.ok ? r.json() : Promise.reject(new Error("8768 failed")))
             ]);
             payloadNavixy = res1.status === "fulfilled" ? res1.value : null;
             payloadDirect = res2.status === "fulfilled" ? res2.value : null;
+            // If both sources are configured to the same URL, one transient fetch failure
+            // should not force a false "broker offline" state.
+            if (sameEndpoint) {
+              if (!payloadNavixy && payloadDirect) payloadNavixy = payloadDirect;
+              if (!payloadDirect && payloadNavixy) payloadDirect = payloadNavixy;
+            }
             lastRows = (payloadNavixy && payloadNavixy.rows) ? payloadNavixy.rows.filter((r) => !isIgnoredTracker(r)) : [];
             if (payloadNavixy && payloadNavixy.ble_positions && Object.keys(blePositions).length === 0) {
               Object.entries(payloadNavixy.ble_positions).forEach(([mac, pos]) => {
@@ -2561,7 +2570,7 @@
             renderTable(lastRows);
             updateBeaconMarkersFromSQL(strictCombined, lastRows);
             let msg = lastRows.length ? `Both: ${lastRows.length} trackers, ${Object.keys(strictCombined).length} beacons` : (payloadNavixy ? "Both: no trackers" : "Broker offline - run .\\start_all.ps1");
-            if (!payloadDirect) { msg = "Broker offline - run .\\start_all.ps1 to get beacon data"; setStatus(msg, true); }
+            if (!payloadDirect && Object.keys(strictCombined).length === 0) { msg = "Broker offline - run .\\start_all.ps1 to get beacon data"; setStatus(msg, true); }
             else setStatus(msg, false);
           } else if (currentDataSource === "direct") {
             try {
