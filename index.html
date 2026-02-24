@@ -935,7 +935,8 @@
           headerIcon = `<span style="font-size:24px;color:white;text-shadow:0 1px 2px rgba(0,0,0,0.3)">${headerSymbol}</span>`;
         }
         
-        const lastSawText = formatLastSaw(beacon.lastSeenAt || beacon.lastUpdate);
+        const popupLastSeen = formatLastSaw(beacon.lastSeen || beacon.lastSeenAt || beacon.lastUpdate) || "N/A";
+        const popupRssi = beacon.rssi != null && Number.isFinite(Number(beacon.rssi)) ? `${Math.round(Number(beacon.rssi))} dBm` : "N/A";
         const pairingSeconds = Math.max(0, Math.floor(Number(beacon.pairingDuration || 0)));
         return `
           <div class="beacon-popup">
@@ -985,14 +986,16 @@
               <span class="beacon-row-label">~Distance</span>
               <span class="beacon-row-value">~${beacon.estimatedDistance.toFixed(1)} m from ${beacon.hostTrackerLabel}</span>
             </div>` : ""}
-            ${beacon.lastSeen ? `<div class="beacon-row">
+            <div class="beacon-row">
               <span class="beacon-row-label">Last Seen</span>
-              <span class="beacon-row-value">${beacon.lastSeen}</span>
-            </div>` : ""}
+              <span class="beacon-row-value">${popupLastSeen}</span>
+            </div>
             <div class="beacon-host" style="background:#f3f4f6;padding:6px 8px;border-radius:4px;margin-top:8px;">
               <div style="font-weight:600;margin-bottom:4px;">📍 BLE Position Info</div>
               <div>Last set by: <strong>${beacon.lastSeenByTracker || beacon.hostTrackerLabel}</strong></div>
-              ${lastSawText ? `<div>Last saw: <strong>${lastSawText}</strong></div>` : ""}
+              <div>Last seen: <strong>${popupLastSeen}</strong></div>
+              <div>Battery: <strong style="color:${batteryColor}">${batteryDisplay}</strong></div>
+              <div>RSSI: <strong>${popupRssi}</strong></div>
               <div>Last Location: <strong>${latStr}, ${lngStr}</strong></div>
               ${beacon.isPaired ?
                 `<div style="color:#059669;font-weight:600;">🔗 PAIRED (${pairingSeconds}s) - Following tracker</div>` :
@@ -1328,11 +1331,12 @@
             sn,
             lat: baseLat, // Show tracker anchor position in popup
             lng: baseLng,
-            battery: pos.battery,
+            battery: (pos.battery != null ? pos.battery : pos.battery_level),
             isPaired: isFollowingTracker,
             pairingDuration: pairingSecondsRaw,
-            lastUpdate: pos.last_update,
-            lastSeenAt: pos.last_update,
+            lastUpdate: pos.last_update || pos.last_seen || pos.updated_at || pos.updated,
+            lastSeenAt: pos.last_seen || pos.last_update || pos.updated_at || pos.updated,
+            lastSeen: pos.last_seen || pos.last_update || pos.updated_at || pos.updated,
             hostTrackerId: forcedHost ? forcedHost.id : pos.last_tracker_id,
             hostTrackerLabel: trackerLabel,
             rssi: rssi,
@@ -2408,14 +2412,17 @@
               last_tracker_id: row.tracker_id,
               last_tracker_label: row.label || String(row.tracker_id),
               last_update: new Date().toISOString(),
+              last_seen: new Date().toISOString(),
               is_paired: false,
             };
             // Beacon data (battery, last_update, etc.) comes only from broker; keep broker fields when present
             if (existing && (existing.battery != null || existing.last_update != null)) {
               combinedBle[mac] = {
                 ...fromRow,
-                battery: existing.battery,
+                battery: existing.battery != null ? existing.battery : existing.battery_level,
                 last_update: existing.last_update || fromRow.last_update,
+                last_seen: existing.last_seen || existing.last_update || fromRow.last_seen,
+                rssi: existing.rssi,
                 last_tracker_id: forceRelink ? fromRow.last_tracker_id : (existing.last_tracker_id ?? fromRow.last_tracker_id),
                 last_tracker_label: forceRelink ? fromRow.last_tracker_label : (existing.last_tracker_label || fromRow.last_tracker_label),
                 is_paired: existing.is_paired,
