@@ -62,6 +62,12 @@
         border-radius: 6px;
         border: 1px solid rgba(255, 255, 255, 0.2);
       }
+      .data-source-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 4px;
+      }
 
       .source-label {
         color: #9ca3af;
@@ -88,6 +94,20 @@
         background: #059669;
         border-color: #047857;
         color: #ffffff;
+      }
+      .source-action-btn {
+        background: #2563eb;
+        color: #ffffff;
+        border: 1px solid #1d4ed8;
+        border-radius: 4px;
+        padding: 2px 8px;
+        cursor: pointer;
+        font-size: 11px;
+      }
+      .source-action-btn:hover { background: #1d4ed8; }
+      .source-action-btn:disabled {
+        opacity: 0.6;
+        cursor: wait;
       }
 
       /* Beacon cluster styling */
@@ -459,7 +479,7 @@
         margin-bottom: 2px;
       }
       .beacon-legend-toggle { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,0.1); }
-      .beacon-legend-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; user-select: none; }
+      .beacon-legend-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; -webkit-user-select: none; user-select: none; }
       .beacon-legend-label input[type="checkbox"] { cursor: pointer; }
       .options-box {
         top: 10px;
@@ -470,6 +490,32 @@
         z-index: 1000;
       }
       .options-box .legend-title { margin-bottom: 6px; font-size: 11px; }
+      .options-actions {
+        margin-top: 8px;
+        padding-top: 6px;
+        border-top: 1px solid rgba(0,0,0,0.1);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .options-action-btn {
+        background: #2563eb;
+        color: #fff;
+        border: 1px solid #1d4ed8;
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .options-action-btn:hover { background: #1d4ed8; }
+      .options-action-btn:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+      .options-action-status {
+        font-size: 10px;
+        color: #334155;
+      }
       .beacon-legend-row {
         display: flex;
         align-items: center;
@@ -481,6 +527,20 @@
         border-radius: 50%;
         border: 2px solid white;
         box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      }
+      .beacon-host-badge {
+        background: rgba(37, 99, 235, 0.95);
+        color: #fff;
+        border: 1px solid rgba(255,255,255,0.9);
+        border-radius: 10px;
+        min-width: 20px;
+        height: 20px;
+        line-height: 20px;
+        text-align: center;
+        font-size: 11px;
+        font-weight: 700;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+        padding: 0 4px;
       }
     </style>
   </head>
@@ -494,6 +554,9 @@
       <button class="source-btn" data-source="motorized_gse" onclick="switchDataSource('motorized_gse')">Motorized GSE</button>
       <button class="source-btn" data-source="direct" onclick="switchDataSource('direct')">Direct</button>
       <button class="source-btn active" data-source="both" onclick="switchDataSource('both')">Both</button>
+      <div class="data-source-actions">
+        <button id="relinkBtnTop" type="button" class="source-action-btn" title="Force beacon re-link to nearest active tracker">Re-link</button>
+      </div>
     </div>
     <div id="mapView" class="view-panel active">
       <div id="map"></div>
@@ -503,6 +566,10 @@
           <input type="checkbox" id="toggleXGpsOptions" checked aria-label="X-GPS Object (Human Agent tracker)">
           <span style="color:#0ea5e9;font-size:14px">📍</span> X-GPS Object (Human Agent tracker)
         </label>
+        <div class="options-actions">
+          <button id="relinkBtn" type="button" class="options-action-btn" title="Force beacon re-link to live detecting tracker">Re-link</button>
+          <span id="relinkStatus" class="options-action-status"></span>
+        </div>
       </div>
       <div class="map-overlay">
         <span id="mapStatus">Loading...</span>
@@ -588,15 +655,8 @@
         }
       })();
       const DATA_SOURCES = window.__NAVIXY_DATA_SOURCES;
-      // Fallback when broker returns wrong/empty data – ALL AT HOME (near Skoda)
-      const HOME_LAT = 32.3107, HOME_LNG = 34.9314;
-      const DIRECT_BEACON_POSITIONS_FALLBACK = {
-        "7cd9f407f95c": { lat: HOME_LAT, lng: HOME_LNG, name: "Eybe2plus1", category: "Towed Device", type: "eye_beacon", last_tracker_label: "Direct" },
-        "7cd9f4003536": { lat: HOME_LAT, lng: HOME_LNG, name: "Eybe2plus2", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
-        "7cd9f406427b": { lat: HOME_LAT, lng: HOME_LNG, name: "EyeBe3", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
-        "7cd9f407a2db": { lat: HOME_LAT, lng: HOME_LNG, name: "EyeBe4", category: "Equipment", type: "eye_beacon", last_tracker_label: "Direct" },
-        "7cd9f4116ee7": { lat: HOME_LAT, lng: HOME_LNG, name: "Eysen2plus", category: "Safety", type: "eye_sensor", last_tracker_label: "Direct" },
-      };
+      // No synthetic home fallback positions - render only tracker-linked beacon positions.
+      const DIRECT_BEACON_POSITIONS_FALLBACK = {};
       let currentDataSource = "both";
       let LIVE_API_URL = DATA_SOURCES[currentDataSource];
       let showXGpsMarkers = true;
@@ -614,8 +674,12 @@
         });
         layer.clearLayers();
         beaconLayer.clearLayers();
+        beaconLinkLayer.clearLayers();
+        beaconBadgeLayer.clearLayers();
         Object.keys(markers).forEach(k => { delete markers[k]; });
         Object.keys(beaconMarkers).forEach(k => delete beaconMarkers[k]);
+        lastBeaconPayload = {};
+        lastBeaconTrackerRows = [];
         if (source === "direct") Object.keys(blePositions).forEach(k => { delete blePositions[k]; });
         xGpsLayer.clearLayers();
         Object.keys(markersXgps).forEach(k => { delete markersXgps[k]; });
@@ -630,9 +694,14 @@
       const debugLayer = L.layerGroup();
       const legendLayer = L.layerGroup();
       const beaconLayer = L.layerGroup().addTo(map);
+      const beaconLinkLayer = L.layerGroup().addTo(map);
+      const beaconBadgeLayer = L.layerGroup().addTo(map);
       const chartLayers = {};
       const beaconMarkers = {};
       const markersXgps = {}; // X-GPS markers (Golan-X-GPS / SKODA) – separate layer so layer control can hide them
+      let lastBeaconPayload = {};
+      let lastBeaconTrackerRows = [];
+      const BEACON_EXPAND_ZOOM = 16;
 
       // ===== BEACON CATEGORY CONFIGURATION =====
       // Categories based on MAC prefix or user-defined mapping
@@ -654,11 +723,13 @@
         "7CD9F406427B": { name: "EyeBe3", sn: "", type: "eye_beacon", category: "Equipment" },
         "7CD9F407A2DB": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7CD9F4116EE7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
+        "7CD9F4106A58": { name: "Beacon 6A58", sn: "", type: "eye_beacon", category: "Uncategorized" },
         "7cd9f407f95c": { name: "Eybe2plus1", sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
         "7cd9f4003536": { name: "Eybe2plus2", sn: "6204011168", type: "eye_beacon", category: "Equipment" },
         "7cd9f406427b": { name: "EyeBe3", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f407a2db": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f4116ee7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
+        "7cd9f4106a58": { name: "Beacon 6A58", sn: "", type: "eye_beacon", category: "Uncategorized" },
       };
 
       // Category icons and colors (matches seed legend: ◆ Towed, ■▲● Equipment, ★ Safety)
@@ -670,6 +741,24 @@
         "Personnel": { shape: "star", color: "#dc2626", image: null },
         "Vehicle": { shape: "hexagon", color: "#7c3aed", image: null },
         "Uncategorized": { shape: "circle", color: "#6b7280", image: null },
+      };
+      const BLE_ALLOWED_TRACKER_TOKENS = ["skoda", "5032", "6074"];
+      // Fixed business mapping requested by operations:
+      // 4 beacons travel together with SKODA, one beacon stays with GSE 5032.
+      const FORCED_BEACON_HOST_BY_MAC = {
+        "7cd9f407f95c": "SKODA",
+        "7cd9f407a2db": "SKODA",
+        "7cd9f4116ee7": "SKODA",
+        "7cd9f4106a58": "SKODA",
+        "7cd9f4003536": "5032",
+      };
+      const STRICT_BEACON_MACS = new Set(Object.keys(FORCED_BEACON_HOST_BY_MAC));
+      const BEACON_SHAPE_BY_MAC = {
+        "7cd9f407f95c": "square",
+        "7cd9f407a2db": "triangle",
+        "7cd9f4116ee7": "hexagon",
+        "7cd9f4106a58": "pentagon",
+        "7cd9f4003536": "circle",
       };
 
       // Extract beacons from tracker data
@@ -752,6 +841,15 @@
             return `<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}">
               <polygon points="${hexPoints.trim()}" fill="${color}" stroke="${stroke}" stroke-width="${strokeWidth}"/>
             </svg>`;
+          case "pentagon":
+            let pentPoints = "";
+            for (let i = 0; i < 5; i++) {
+              const angle = (Math.PI / 2) + (i * 2 * Math.PI / 5);
+              pentPoints += `${half + (half-3) * Math.cos(angle)},${half - (half-3) * Math.sin(angle)} `;
+            }
+            return `<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}">
+              <polygon points="${pentPoints.trim()}" fill="${color}" stroke="${stroke}" stroke-width="${strokeWidth}"/>
+            </svg>`;
           default:
             return `<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}">
               <circle cx="${half}" cy="${half}" r="${half-3}" fill="${color}" stroke="${stroke}" stroke-width="${strokeWidth}"/>
@@ -759,9 +857,17 @@
         }
       }
       
-      function createBeaconIcon(beaconType, assetCategory, size = 24) {
+      function beaconShapeForMac(mac, fallbackCategory) {
+        const byMac = BEACON_SHAPE_BY_MAC[String(mac || "").toLowerCase()];
+        if (byMac) return byMac;
+        const catConfig = CATEGORY_CONFIG[fallbackCategory] || CATEGORY_CONFIG["Uncategorized"];
+        return catConfig.shape || "circle";
+      }
+
+      function createBeaconIcon(beaconType, assetCategory, size = 24, mac = "") {
         const catConfig = CATEGORY_CONFIG[assetCategory] || CATEGORY_CONFIG["Uncategorized"];
-        const shapeSVG = getShapeSVG(catConfig.shape || "circle", catConfig.color, size);
+        const shape = beaconShapeForMac(mac, assetCategory);
+        const shapeSVG = getShapeSVG(shape, catConfig.color, size);
         
         return L.divIcon({
           className: `beacon-marker`,
@@ -820,14 +926,17 @@
         if (catConfig.image) {
           headerIcon = `<img src="${catConfig.image}" style="width:48px;height:32px;object-fit:contain;background:white;border-radius:4px;padding:2px;" />`;
         } else {
+          const mappedShape = beaconShapeForMac(beacon.mac, beacon.category);
           const shapeSymbols = {
             diamond: "◆", square: "■", triangle: "▲", 
-            circle: "●", star: "★", hexagon: "⬡"
+            circle: "●", star: "★", hexagon: "⬡", pentagon: "⬟"
           };
-          const headerSymbol = shapeSymbols[catConfig.shape] || "●";
+          const headerSymbol = shapeSymbols[mappedShape] || "●";
           headerIcon = `<span style="font-size:24px;color:white;text-shadow:0 1px 2px rgba(0,0,0,0.3)">${headerSymbol}</span>`;
         }
         
+        const lastSawText = formatLastSaw(beacon.lastSeenAt || beacon.lastUpdate);
+        const pairingSeconds = Math.max(0, Math.floor(Number(beacon.pairingDuration || 0)));
         return `
           <div class="beacon-popup">
             <div class="beacon-header" style="background:${catConfig.color};color:white;padding:8px 12px;margin:-12px -12px 10px -12px;border-radius:4px 4px 0 0;display:flex;align-items:center;gap:8px;">
@@ -837,6 +946,16 @@
                 <div style="font-size:11px;opacity:0.9">${beacon.name}</div>
               </div>
             </div>
+            <div class="beacon-row" style="font-weight:700;color:#334155;">Stationery Device Information</div>
+            <div class="beacon-row">
+              <span class="beacon-row-label">Category</span>
+              <span class="beacon-row-value">${beacon.category}</span>
+            </div>
+            <div class="beacon-row">
+              <span class="beacon-row-label">Stationery Name</span>
+              <span class="beacon-row-value">${beacon.name}</span>
+            </div>
+            <div class="beacon-row" style="font-weight:700;color:#334155;margin-top:6px;">HW</div>
             <div class="beacon-row">
               <span class="beacon-row-label">Type</span>
               <span class="beacon-row-value">${typeInfo.label}</span>
@@ -858,6 +977,14 @@
               <span class="beacon-row-label">Lat / Long</span>
               <span class="beacon-row-value" style="font-family:monospace;font-size:10px">${latStr}, ${lngStr}</span>
             </div>
+            ${beacon.rssi != null ? `<div class="beacon-row">
+              <span class="beacon-row-label">Signal (RSSI)</span>
+              <span class="beacon-row-value" style="font-family:monospace">${Math.round(beacon.rssi)} dBm</span>
+            </div>` : ""}
+            ${beacon.estimatedDistance != null ? `<div class="beacon-row">
+              <span class="beacon-row-label">~Distance</span>
+              <span class="beacon-row-value">~${beacon.estimatedDistance.toFixed(1)} m from ${beacon.hostTrackerLabel}</span>
+            </div>` : ""}
             ${beacon.lastSeen ? `<div class="beacon-row">
               <span class="beacon-row-label">Last Seen</span>
               <span class="beacon-row-value">${beacon.lastSeen}</span>
@@ -865,14 +992,19 @@
             <div class="beacon-host" style="background:#f3f4f6;padding:6px 8px;border-radius:4px;margin-top:8px;">
               <div style="font-weight:600;margin-bottom:4px;">📍 BLE Position Info</div>
               <div>Last set by: <strong>${beacon.lastSeenByTracker || beacon.hostTrackerLabel}</strong></div>
-              ${beacon.lastSeenAt || beacon.lastUpdate ? `<div>Last saw: <strong>${formatLastSaw(beacon.lastSeenAt || beacon.lastUpdate)}</strong></div>` : ""}
-              ${beacon.isPaired ? 
-                `<div style="color:#059669;font-weight:600;">🔗 PAIRED (${beacon.pairingDuration}s) - Following tracker</div>` : 
+              ${lastSawText ? `<div>Last saw: <strong>${lastSawText}</strong></div>` : ""}
+              <div>Last Location: <strong>${latStr}, ${lngStr}</strong></div>
+              ${beacon.isPaired ?
+                `<div style="color:#059669;font-weight:600;">🔗 PAIRED (${pairingSeconds}s) - Following tracker</div>` :
                 beacon.pairingDuration > 0 ?
-                `<div style="color:#f59e0b;font-weight:600;">⏳ Pairing... (${beacon.pairingDuration}s / 60s)</div>` :
-                `<div style="color:#6b7280;">📍 Last known position (static)</div>`
+                `<div style="color:#f59e0b;font-weight:600;">⏳ Pairing... (${pairingSeconds}s / 60s)</div>` :
+                `<div style="color:#6b7280;">📍 Last known position</div>`
               }
-              ${beacon.distanceFromTracker > 0 ? `<div>📏 Distance to tracker: <strong>${Math.round(beacon.distanceFromTracker)} m</strong></div>` : ''}
+              ${beacon.estimatedDistance != null
+                ? `<div>📡 RSSI distance: <strong>~${beacon.estimatedDistance.toFixed(1)} m</strong> from ${beacon.hostTrackerLabel}</div>`
+                : (beacon.distanceFromTracker > 0
+                  ? `<div>📏 Distance to tracker: <strong>${Math.round(beacon.distanceFromTracker)} m</strong></div>`
+                  : '')}
             </div>
           </div>
         `;
@@ -912,12 +1044,142 @@
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         return R * c;
       }
-      
-      // ===== MARKER SPREADING FOR OVERLAPPING ICONS =====
-      // Shared position group so trackers and beacons at same location spread in one circle (no stacking)
+
+      // ===== RSSI-BASED DISTANCE ESTIMATION =====
+      // Log-distance path loss model for BLE signal strength -> approximate meters
+      const BLE_TX_POWER = -59;      // Teltonika Eye Beacon calibrated RSSI at 1 meter
+      const BLE_PATH_LOSS_N = 2.5;   // Path loss exponent (mixed outdoor/near-vehicle environment)
+      const BLE_MIN_SPREAD = 2;      // Min 2m visual offset — never stack beacon on tracker icon
+      const BLE_MAX_SPREAD = 30;     // Max 30m — conservative cap so ground crew isn't misled
+
+      function rssiToMeters(rssi) {
+        if (rssi == null || !Number.isFinite(rssi)) return null;
+        const d = Math.pow(10, (BLE_TX_POWER - rssi) / (10 * BLE_PATH_LOSS_N));
+        return Math.max(BLE_MIN_SPREAD, Math.min(BLE_MAX_SPREAD, d));
+      }
+
+      function metersToLatOffset(m) { return m / 111320; }
+      function metersToLngOffset(m, lat) { return m / (111320 * Math.cos(lat * Math.PI / 180)); }
+
+      // ===== RSSI SMOOTHING (prevent jitter between 5s refreshes) =====
+      const beaconRssiSmoothed = {};
+      const RSSI_SMOOTH_ALPHA = 0.3; // Lower = smoother but slower to react
+
+      function smoothRssi(mac, rawRssi) {
+        if (rawRssi == null) return beaconRssiSmoothed[mac] || null;
+        const prev = beaconRssiSmoothed[mac];
+        const smoothed = prev != null ? RSSI_SMOOTH_ALPHA * rawRssi + (1 - RSSI_SMOOTH_ALPHA) * prev : rawRssi;
+        beaconRssiSmoothed[mac] = smoothed;
+        return smoothed;
+      }
+
+      // ===== RSSI-AWARE BEACON SPREAD =====
+      // Beacons spread around their detecting tracker at RSSI-estimated distance
+      // Each beacon gets a unique angle; distance proportional to signal strength
+      function getBeaconRssiOffset(baseLat, rssi, beaconIndex, totalBeacons) {
+        const meters = rssi != null ? rssiToMeters(rssi) : 0; // no RSSI => keep exact last location
+        if (meters == null || totalBeacons <= 0) return { lat: 0, lng: 0 };
+        const angle = (beaconIndex / totalBeacons) * 2 * Math.PI;
+        return {
+          lat: metersToLatOffset(meters) * Math.sin(angle),
+          lng: metersToLngOffset(meters, baseLat) * Math.cos(angle)
+        };
+      }
+
+      function forcedHostGroupKey(host) {
+        return host ? String(host.id || host.label || "").toLowerCase() : "";
+      }
+
+      function spreadPixelsForGroup(count, zoom) {
+        const z = Number.isFinite(zoom) ? zoom : 14;
+        const base = z >= 17 ? 24 : z >= 15 ? 28 : 32;
+        const extra = Math.max(0, count - 2) * 4;
+        return Math.max(20, Math.min(44, base + extra));
+      }
+
+      function macStableAngle(mac) {
+        const text = String(mac || "").toLowerCase();
+        let hash = 0;
+        for (let i = 0; i < text.length; i++) hash = ((hash << 5) - hash) + text.charCodeAt(i);
+        const n = Math.abs(hash % 360);
+        return (n * Math.PI) / 180;
+      }
+
+      function getForcedBeaconHostOffset(baseLat, baseLng, mac, host, forcedHostGroups) {
+        const hostKey = forcedHostGroupKey(host);
+        const group = forcedHostGroups[hostKey] || [];
+        if (!group.length) return { lat: 0, lng: 0 };
+        const idx = Math.max(0, group.indexOf(String(mac || "").toLowerCase()));
+        const count = Math.max(1, group.length);
+        const zoom = (typeof map !== "undefined" && map && typeof map.getZoom === "function") ? map.getZoom() : 14;
+        const angle = (count === 1)
+          ? macStableAngle(mac) // single beacon still gets a small stable gap from host
+          : (idx / count) * 2 * Math.PI;
+        if (typeof map !== "undefined" && map && typeof map.project === "function" && typeof map.unproject === "function") {
+          const rPx = spreadPixelsForGroup(count, zoom);
+          const c = map.project([baseLat, baseLng], zoom);
+          const p = L.point(c.x + rPx * Math.cos(angle), c.y + rPx * Math.sin(angle));
+          const ll = map.unproject(p, zoom);
+          return { lat: ll.lat - baseLat, lng: ll.lng - baseLng };
+        }
+        const meters = 14 + (count - 1) * 3;
+        return {
+          lat: metersToLatOffset(meters) * Math.sin(angle),
+          lng: metersToLngOffset(meters, baseLat) * Math.cos(angle)
+        };
+      }
+
+      function isAllowedBleTrackerLabel(labelOrId) {
+        const text = String(labelOrId || "").toLowerCase();
+        return BLE_ALLOWED_TRACKER_TOKENS.some((token) => text.includes(token));
+      }
+
+      function normalizeTrackerLabel(labelOrId) {
+        const text = String(labelOrId || "").trim();
+        if (!text) return "";
+        if (/skoda/i.test(text)) return "SKODA";
+        return text;
+      }
+
+      function findForcedHostTracker(mac, trackerRows) {
+        const hostHint = FORCED_BEACON_HOST_BY_MAC[String(mac || "").toLowerCase()];
+        if (!hostHint || !Array.isArray(trackerRows)) return null;
+        const needle = hostHint.toLowerCase();
+        for (const row of trackerRows) {
+          const label = String(row?.label || "").toLowerCase();
+          const id = String(row?.tracker_id || "").toLowerCase();
+          const lat = Number(row?.lat);
+          const lng = Number(row?.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+          if (label.includes(needle) || id.includes(needle)) {
+            return { lat, lng, label: normalizeTrackerLabel(row.label || row.tracker_id), id: row.tracker_id };
+          }
+        }
+        return null;
+      }
+
+      function applyStrictBeaconInventory(combinedBle) {
+        const filtered = {};
+        STRICT_BEACON_MACS.forEach((lower) => {
+          const existing = (combinedBle && (combinedBle[lower] || combinedBle[lower.toUpperCase()])) ? (combinedBle[lower] || combinedBle[lower.toUpperCase()]) : {};
+          const known = KNOWN_BEACONS[lower] || KNOWN_BEACONS[lower.toUpperCase()] || {};
+          // Always keep required beacons in model even if API omitted one this cycle.
+          filtered[lower] = {
+            mac: lower,
+            name: known.name || `Beacon ${lower.slice(-4)}`,
+            category: known.category || "Uncategorized",
+            type: known.type || "eye_beacon",
+            ...existing,
+          };
+        });
+        return filtered;
+      }
+
+      // ===== MARKER SPREADING FOR OVERLAPPING TRACKER ICONS =====
+      // Shared position group so trackers at same location spread in one circle (no stacking)
       const positionGroups = {};
       const SPREAD_DISTANCE = 0.00014; // ~15m radius so markers are readable and don't overlap
-      
+
       function getSpreadOffset(lat, lng, markerId) {
         const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
         if (!positionGroups[key]) positionGroups[key] = [];
@@ -934,99 +1196,210 @@
           lng: SPREAD_DISTANCE * Math.cos(angle)
         };
       }
-      
+
       function clearMarkerPositions() {
         Object.keys(positionGroups).forEach(key => { positionGroups[key] = []; });
       }
 
-      // Use ONLY ble_positions from API; trackers + beacons at same location share one spread circle - each beacon appears ONLY ONCE
-      // STATIC positions - only updated when paired > 60 seconds
+      // Dynamic RSSI-based beacon positioning: beacons spread around their detecting tracker
+      // at distances proportional to BLE signal strength. Updates position on every refresh.
+      // Priority: RUTX11 (tractor) > FMC/OBD (vehicles) > Navixy cloud (fallback)
       function updateBeaconMarkersFromSQL(blePositionsData, trackerRows) {
         const now = Date.now();
         const macs = Object.keys(blePositionsData);
-        
+        lastBeaconPayload = { ...(blePositionsData || {}) };
+        lastBeaconTrackerRows = Array.isArray(trackerRows) ? [...trackerRows] : [];
+        beaconLinkLayer.clearLayers();
+        beaconBadgeLayer.clearLayers();
+        const expandedLayout = map.getZoom() >= BEACON_EXPAND_ZOOM;
+
         // Create tracker lookup for labels
         const trackerLookup = {};
         trackerRows.forEach(row => {
           trackerLookup[row.tracker_id] = { lat: row.lat, lng: row.lng, label: row.label };
           if (row.imei) trackerLookup[row.imei] = { lat: row.lat, lng: row.lng, label: row.label };
         });
-        
-        // *** NEVER REMOVE BEACON MARKERS ***
-        // Static assets stay visible at last known position forever
-        // Only update content, not position (unless being towed)
-        console.log(`[BLE] Received ${macs.length} beacons from API`);
-        
-        // Update/create markers for each BLE in ble_positions (use shared getSpreadOffset so trackers + beacons spread together)
+        const allowedTrackers = trackerRows
+          .filter((row) => !isXGpsHumanAgent(row))
+          .filter((row) => isAllowedBleTrackerLabel(row.label) || isAllowedBleTrackerLabel(row.tracker_id))
+          .map((row) => ({
+            id: row.tracker_id,
+            label: normalizeTrackerLabel(row.label || row.tracker_id),
+            lat: Number(row.lat),
+            lng: Number(row.lng),
+          }))
+          .filter((t) => Number.isFinite(t.lat) && Number.isFinite(t.lng));
+
+        // Group beacons by detecting tracker for stable angle assignment
+        const trackerBeaconGroups = {};
         Object.entries(blePositionsData).forEach(([mac, pos]) => {
-          const baseLat = Number(pos.lat);
-          const baseLng = Number(pos.lng);
-          
+          const tid = pos.last_tracker_id || "unknown";
+          if (!trackerBeaconGroups[tid]) trackerBeaconGroups[tid] = [];
+          trackerBeaconGroups[tid].push(mac);
+        });
+        // Sort each group by MAC for stable angle assignment across refreshes
+        Object.values(trackerBeaconGroups).forEach(arr => arr.sort());
+
+        // Precompute fixed beacon host groups (e.g. 4 around SKODA, 1 on 5032)
+        const forcedHostByMac = {};
+        const forcedHostGroups = {};
+        Object.keys(FORCED_BEACON_HOST_BY_MAC).forEach((mac) => {
+          const lower = String(mac || "").toLowerCase();
+          const host = findForcedHostTracker(lower, trackerRows);
+          if (!host) return;
+          forcedHostByMac[lower] = host;
+          const key = forcedHostGroupKey(host);
+          if (!forcedHostGroups[key]) forcedHostGroups[key] = [];
+          forcedHostGroups[key].push(lower);
+        });
+        Object.values(forcedHostGroups).forEach((arr) => arr.sort());
+
+        console.log(`[BLE] Received ${macs.length} beacons from API (${Object.keys(trackerBeaconGroups).length} tracker groups)`);
+
+        // Update/create markers for each beacon with RSSI-based offset from detecting tracker
+        const renderedMacs = new Set();
+        Object.entries(blePositionsData).forEach(([mac, pos]) => {
+          const normalizedMac = String(mac || "").toLowerCase();
+          if (!STRICT_BEACON_MACS.has(normalizedMac)) return;
+          const forcedHost = forcedHostByMac[normalizedMac] || findForcedHostTracker(mac, trackerRows);
+          const baseLat = Number(forcedHost ? forcedHost.lat : pos.lat);
+          const baseLng = Number(forcedHost ? forcedHost.lng : pos.lng);
+
           if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng)) {
             console.log(`[BLE] Skipping ${mac} - no position yet`);
             return;
           }
-          
-          const offset = getSpreadOffset(baseLat, baseLng, `beacon_${mac}`);
+          renderedMacs.add(normalizedMac);
+
+          // RSSI-based spread: distance from signal strength, angle from group index
+          const trackerId = pos.last_tracker_id || "unknown";
+          const group = trackerBeaconGroups[trackerId] || [mac];
+          const idx = group.indexOf(mac);
+          const totalBeacons = group.length;
+          const rawRssi = pos.rssi != null ? Number(pos.rssi) : null;
+          const rssi = smoothRssi(mac, rawRssi);
+          const estDistance = rssiToMeters(rssi);
+          const pairingSecondsRaw = Math.max(0, Number(pos.pairing_duration || 0));
+          const isForcedHostBeacon = !!forcedHost;
+          const hasLiveRssi = Number.isFinite(rawRssi);
+          const isFollowingTracker = isForcedHostBeacon || (Boolean(pos.is_paired) && pairingSecondsRaw > 0 && hasLiveRssi);
+          const offset = isForcedHostBeacon
+            ? (expandedLayout ? getForcedBeaconHostOffset(baseLat, baseLng, normalizedMac, forcedHost, forcedHostGroups) : { lat: 0, lng: 0 })
+            : (isFollowingTracker ? getBeaconRssiOffset(baseLat, rssi, idx, totalBeacons) : { lat: 0, lng: 0 });
           const lat = baseLat + offset.lat;
           const lng = baseLng + offset.lng;
-          
+
           // Get BLE definition info
           const knownInfo = KNOWN_BEACONS[mac.toUpperCase()] || {};
           const name = pos.name || knownInfo.name || `Beacon ${mac.slice(-4)}`;
           const category = pos.category || knownInfo.category || "Uncategorized";
           const beaconType = pos.type || knownInfo.type || "eye_beacon";
           const sn = knownInfo.sn || "";
-          
+
           // Get tracker label
-          const trackerLabel = pos.last_tracker_label || 
-                               (trackerLookup[pos.last_tracker_id] ? trackerLookup[pos.last_tracker_id].label : pos.last_tracker_id) ||
-                               "Unknown";
-          
+          let trackerLabel = (forcedHost ? forcedHost.label : null) || pos.last_tracker_label ||
+                             (trackerLookup[pos.last_tracker_id] ? trackerLookup[pos.last_tracker_id].label : pos.last_tracker_id) ||
+                             "Unknown";
+          if (!isAllowedBleTrackerLabel(trackerLabel) && !isAllowedBleTrackerLabel(pos.last_tracker_id)) {
+            if (allowedTrackers.length) {
+              let nearest = allowedTrackers[0];
+              let minDistance = calculateDistance(baseLat, baseLng, nearest.lat, nearest.lng);
+              for (let i = 1; i < allowedTrackers.length; i++) {
+                const t = allowedTrackers[i];
+                const d = calculateDistance(baseLat, baseLng, t.lat, t.lng);
+                if (d < minDistance) {
+                  minDistance = d;
+                  nearest = t;
+                }
+              }
+              trackerLabel = nearest.label;
+            } else {
+              trackerLabel = "SKODA";
+            }
+          } else {
+            trackerLabel = normalizeTrackerLabel(trackerLabel);
+          }
+
           const beacon = {
             mac,
             name,
             category,
             beaconType,
             sn,
-            lat: baseLat, // Show original position in popup
+            lat: baseLat, // Show tracker anchor position in popup
             lng: baseLng,
             battery: pos.battery,
-            isPaired: pos.is_paired,
-            pairingDuration: pos.pairing_duration || 0,
+            isPaired: isFollowingTracker,
+            pairingDuration: pairingSecondsRaw,
             lastUpdate: pos.last_update,
             lastSeenAt: pos.last_update,
-            hostTrackerId: pos.last_tracker_id,
+            hostTrackerId: forcedHost ? forcedHost.id : pos.last_tracker_id,
             hostTrackerLabel: trackerLabel,
+            rssi: rssi,
+            estimatedDistance: estDistance,
           };
-          
+
           let marker = beaconMarkers[mac];
           if (!marker) {
-            // Create new marker at STABLE position
+            // Create new marker
             marker = L.marker([lat, lng], {
-              icon: createBeaconIcon(beaconType, category),
+              icon: createBeaconIcon(beaconType, category, 24, normalizedMac),
             }).bindPopup(beaconPopupHtml(beacon));
-            
-            const catConfig = CATEGORY_CONFIG[category] || CATEGORY_CONFIG["Uncategorized"];
-            const shapeSymbols = { diamond: "◆", square: "■", triangle: "▲", circle: "●", star: "★", hexagon: "⬡" };
-            const symbol = shapeSymbols[catConfig.shape] || "●";
+
+            const shape = beaconShapeForMac(normalizedMac, category);
+            const shapeSymbols = { diamond: "◆", square: "■", triangle: "▲", circle: "●", star: "★", hexagon: "⬡", pentagon: "⬟" };
+            const symbol = shapeSymbols[shape] || "●";
             marker.bindTooltip(`${symbol} ${name}`, {
               permanent: false,
               direction: "top",
               offset: [0, -12],
               className: "beacon-tooltip"
             });
-            
+
             beaconMarkers[mac] = marker;
             marker.addTo(beaconLayer);
-            console.log(`[BLE] Added STATIC marker: ${mac} (${name}) at (${lat.toFixed(6)}, ${lng.toFixed(6)})`);
+            console.log(`[BLE] Added marker: ${mac} (${name}) RSSI=${rawRssi} ~${estDistance ? estDistance.toFixed(1) + 'm' : 'N/A'} at (${lat.toFixed(6)}, ${lng.toFixed(6)})`);
           } else {
-            // Only update popup content, NOT position (markers are STATIC)
+            // Update BOTH position and popup on every refresh (dynamic positioning)
+            marker.setLatLng([lat, lng]);
             marker.setPopupContent(beaconPopupHtml(beacon));
           }
+          if (expandedLayout && isForcedHostBeacon) {
+            beaconLinkLayer.addLayer(L.polyline([[baseLat, baseLng], [lat, lng]], {
+              color: "#64748b",
+              weight: 1,
+              opacity: 0.6,
+              dashArray: "3,4",
+              interactive: false
+            }));
+          }
         });
-        
-        console.log(`[BLE] Total STATIC markers: ${Object.keys(beaconMarkers).length}`);
+
+        if (!expandedLayout) {
+          Object.entries(forcedHostGroups).forEach(([, macList]) => {
+            if (!Array.isArray(macList) || macList.length <= 1) return;
+            const anyMac = macList[0];
+            const host = forcedHostByMac[anyMac];
+            if (!host) return;
+            const icon = L.divIcon({
+              className: "",
+              html: `<div class="beacon-host-badge">${macList.length}</div>`,
+              iconSize: [24, 20],
+              iconAnchor: [12, 10],
+            });
+            beaconBadgeLayer.addLayer(L.marker([host.lat, host.lng], { icon, interactive: false }));
+          });
+        }
+
+        Object.keys(beaconMarkers).forEach((mac) => {
+          const lower = String(mac || "").toLowerCase();
+          if (!renderedMacs.has(lower)) {
+            beaconLayer.removeLayer(beaconMarkers[mac]);
+            delete beaconMarkers[mac];
+          }
+        });
+
+        console.log(`[BLE] Total beacon markers: ${Object.keys(beaconMarkers).length}`);
       }
 
       // OLD: Keep for reference but not used
@@ -1184,12 +1557,12 @@
           let marker = beaconMarkers[mac];
           if (!marker) {
             marker = L.marker([markerLat, markerLng], {
-              icon: createBeaconIcon(beacon.beaconType, beacon.category),
+              icon: createBeaconIcon(beacon.beaconType, beacon.category, 24, mac),
             }).bindPopup(beaconPopupHtml(beacon));
             
-            const catConfig = CATEGORY_CONFIG[beacon.category] || CATEGORY_CONFIG["Uncategorized"];
-            const shapeSymbols = { diamond: "◆", square: "■", triangle: "▲", circle: "●", star: "★", hexagon: "⬡" };
-            const symbol = shapeSymbols[catConfig.shape] || "●";
+            const shape = beaconShapeForMac(mac, beacon.category);
+            const shapeSymbols = { diamond: "◆", square: "■", triangle: "▲", circle: "●", star: "★", hexagon: "⬡", pentagon: "⬟" };
+            const symbol = shapeSymbols[shape] || "●";
             marker.bindTooltip(`${symbol} ${beacon.name || mac}`, {
               permanent: false,
               direction: "top",
@@ -1361,6 +1734,9 @@
       const iconCache = new Map();
       const lastPositions = new Map();
       const clearButton = document.getElementById("clearPopup");
+      const relinkButton = document.getElementById("relinkBtn");
+      const relinkButtonTop = document.getElementById("relinkBtnTop");
+      const relinkStatus = document.getElementById("relinkStatus");
       const debugOverlay = document.getElementById("debugOverlay");
       const legendOverlay = document.getElementById("legendOverlay");
 
@@ -1369,6 +1745,29 @@
           Object.values(markers).forEach((marker) => marker.closePopup());
           activePopupId = null;
         });
+      }
+
+      function setRelinkUi(isBusy, text) {
+        if (relinkButton) relinkButton.disabled = !!isBusy;
+        if (relinkButtonTop) relinkButtonTop.disabled = !!isBusy;
+        if (relinkStatus) relinkStatus.textContent = text || "";
+      }
+
+      function isIgnoredTracker(rowOrId, maybeLabel) {
+        const id = typeof rowOrId === "object" ? String(rowOrId?.tracker_id || "") : String(rowOrId || "");
+        const label = typeof rowOrId === "object" ? String(rowOrId?.label || "") : String(maybeLabel || "");
+        const s = `${id} ${label}`.toLowerCase();
+        return s.includes("rutx11");
+      }
+
+      function clearBeaconRuntimeState() {
+        Object.keys(blePositions).forEach((k) => delete blePositions[k]);
+        Object.keys(blePairingTracker).forEach((k) => delete blePairingTracker[k]);
+        Object.keys(blePairingStart).forEach((k) => delete blePairingStart[k]);
+        Object.keys(beaconLastSeen).forEach((k) => delete beaconLastSeen[k]);
+        Object.keys(beaconRssiSmoothed).forEach((k) => delete beaconRssiSmoothed[k]);
+        beaconLayer.clearLayers();
+        Object.keys(beaconMarkers).forEach((k) => delete beaconMarkers[k]);
       }
 
       const viewTabs = document.querySelectorAll(".view-tab");
@@ -1471,7 +1870,12 @@
         });
       }
 
-      map.on("zoomend", updateMarkerIcons);
+      map.on("zoomend", () => {
+        updateMarkerIcons();
+        if (Object.keys(lastBeaconPayload || {}).length) {
+          updateBeaconMarkersFromSQL(lastBeaconPayload, lastBeaconTrackerRows || []);
+        }
+      });
 
       const LOW_FUEL_THRESHOLD = 20;
       const LOW_BATTERY_THRESHOLD = 24;
@@ -1831,6 +2235,7 @@
         const xgpsSeen = new Set();
 
         rows.forEach((row) => {
+          if (isIgnoredTracker(row)) return;
           const lat = Number(row.lat);
           const lng = Number(row.lng);
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
@@ -1929,7 +2334,8 @@
         const statusEl = document.getElementById("mapStatus");
         const debugEl = document.getElementById("mapDebug");
         if (statusEl) {
-          statusEl.textContent = `Trackers: ${rows.length} | Markers: ${bounds.length}`;
+          const visibleTrackers = rows.filter((r) => !isIgnoredTracker(r)).length;
+          statusEl.textContent = `Trackers: ${visibleTrackers} | Markers: ${bounds.length}`;
         }
         if (debugEl) {
           const first = rows.find((row) => Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lng)));
@@ -1980,8 +2386,9 @@
         }
       }
       
-      function mergeBeaconsFromRows(combinedBle, rows) {
+      function mergeBeaconsFromRows(combinedBle, rows, forceRelink) {
         rows.forEach(row => {
+          if (isIgnoredTracker(row)) return;
           if (!row.beacons || !Array.isArray(row.beacons)) return;
           const lat = Number(row.lat);
           const lng = Number(row.lng);
@@ -1991,7 +2398,7 @@
             if (!mac) return;
             const existing = combinedBle[mac];
             const hasStored = existing && Number.isFinite(Number(existing.lat)) && Number.isFinite(Number(existing.lng));
-            if (hasStored) return;
+            if (hasStored && !forceRelink) return;
             const known = KNOWN_BEACONS[mac] || KNOWN_BEACONS[mac.toUpperCase()] || {};
             const fromRow = {
               lat, lng,
@@ -2005,12 +2412,73 @@
             };
             // Beacon data (battery, last_update, etc.) comes only from broker; keep broker fields when present
             if (existing && (existing.battery != null || existing.last_update != null)) {
-              combinedBle[mac] = { ...fromRow, battery: existing.battery, last_update: existing.last_update || fromRow.last_update, last_tracker_id: existing.last_tracker_id ?? fromRow.last_tracker_id, last_tracker_label: existing.last_tracker_label || fromRow.last_tracker_label, is_paired: existing.is_paired, pairing_duration: existing.pairing_duration };
+              combinedBle[mac] = {
+                ...fromRow,
+                battery: existing.battery,
+                last_update: existing.last_update || fromRow.last_update,
+                last_tracker_id: forceRelink ? fromRow.last_tracker_id : (existing.last_tracker_id ?? fromRow.last_tracker_id),
+                last_tracker_label: forceRelink ? fromRow.last_tracker_label : (existing.last_tracker_label || fromRow.last_tracker_label),
+                is_paired: existing.is_paired,
+                pairing_duration: existing.pairing_duration
+              };
             } else {
               combinedBle[mac] = fromRow;
             }
           });
         });
+      }
+
+      function sanitizeBeaconPositions(combinedBle, trackerRows, options = {}) {
+        const forceAllToNearestTracker = !!options.forceAllToNearestTracker;
+        const activeTrackers = (trackerRows || [])
+          .filter((row) => !isIgnoredTracker(row))
+          .map((row) => ({
+            id: row.tracker_id,
+            label: row.label || String(row.tracker_id),
+            lat: Number(row.lat),
+            lng: Number(row.lng),
+          }))
+          .filter((t) => Number.isFinite(t.lat) && Number.isFinite(t.lng));
+
+        if (!activeTrackers.length) return combinedBle;
+
+        const maxAllowedMeters = 2000;
+        Object.keys(combinedBle).forEach((mac) => {
+          const pos = combinedBle[mac] || {};
+          const lat = Number(pos.lat);
+          const lng = Number(pos.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+          const ignoredTracker = isIgnoredTracker(pos.last_tracker_id, pos.last_tracker_label);
+          let nearest = null;
+          let nearestDistance = Infinity;
+          activeTrackers.forEach((t) => {
+            const d = calculateDistance(lat, lng, t.lat, t.lng);
+            if (d < nearestDistance) {
+              nearestDistance = d;
+              nearest = t;
+            }
+          });
+          if (!nearest) return;
+          const shouldSnapToNearest = forceAllToNearestTracker || nearestDistance > maxAllowedMeters;
+          if (shouldSnapToNearest) {
+            combinedBle[mac] = {
+              ...pos,
+              lat: nearest.lat,
+              lng: nearest.lng,
+              last_tracker_id: nearest.id,
+              last_tracker_label: nearest.label,
+              last_update: new Date().toISOString(),
+            };
+          } else if (ignoredTracker && !forceAllToNearestTracker) {
+            // Keep last coordinates, but normalize label so popup does not show RUTX11.
+            combinedBle[mac] = {
+              ...pos,
+              last_tracker_id: nearest.id,
+              last_tracker_label: nearest.label,
+            };
+          }
+        });
+        return combinedBle;
       }
 
       let loadInProgress = false;
@@ -2033,10 +2501,12 @@
         return fetch(url, opts);
       }
 
-      async function loadData() {
+      async function loadData(options = {}) {
         if (loadInProgress) return;
         loadInProgress = true;
+        const forceRelink = !!options.forceRelink;
         if (!hasLoadedOnce) setStatus("Loading…");
+        if (forceRelink) setRelinkUi(true, "Relinking...");
         try {
           Object.keys(positionGroups).forEach(key => delete positionGroups[key]);
           let payloadNavixy = null;
@@ -2049,7 +2519,7 @@
             ]);
             payloadNavixy = res1.status === "fulfilled" ? res1.value : null;
             payloadDirect = res2.status === "fulfilled" ? res2.value : null;
-            lastRows = (payloadNavixy && payloadNavixy.rows) ? payloadNavixy.rows : [];
+            lastRows = (payloadNavixy && payloadNavixy.rows) ? payloadNavixy.rows.filter((r) => !isIgnoredTracker(r)) : [];
             if (payloadNavixy && payloadNavixy.ble_positions && Object.keys(blePositions).length === 0) {
               Object.entries(payloadNavixy.ble_positions).forEach(([mac, pos]) => {
                 blePositions[mac] = { lat: pos.lat, lng: pos.lng, lastTracker: pos.last_tracker_id, lastTrackerLabel: pos.last_tracker_label || "Unknown", lastUpdate: pos.last_update, isPaired: pos.is_paired };
@@ -2071,11 +2541,17 @@
                 }
               });
             }
-            mergeBeaconsFromRows(combinedBle, lastRows);
+            const directRows = (payloadDirect && payloadDirect.rows) ? payloadDirect.rows : [];
+            mergeBeaconsFromRows(combinedBle, directRows, forceRelink);
+            mergeBeaconsFromRows(combinedBle, lastRows, forceRelink);
+            const strictCombined = applyStrictBeaconInventory(combinedBle);
+            sanitizeBeaconPositions(strictCombined, lastRows, {
+              forceAllToNearestTracker: forceRelink
+            });
             updateMarkers(lastRows);
             renderTable(lastRows);
-            updateBeaconMarkersFromSQL(combinedBle, lastRows);
-            let msg = lastRows.length ? `Both: ${lastRows.length} trackers, ${Object.keys(combinedBle).length} beacons` : (payloadNavixy ? "Both: no trackers" : "Broker offline - run .\\start_all.ps1");
+            updateBeaconMarkersFromSQL(strictCombined, lastRows);
+            let msg = lastRows.length ? `Both: ${lastRows.length} trackers, ${Object.keys(strictCombined).length} beacons` : (payloadNavixy ? "Both: no trackers" : "Broker offline - run .\\start_all.ps1");
             if (!payloadDirect) { msg = "Broker offline - run .\\start_all.ps1 to get beacon data"; setStatus(msg, true); }
             else setStatus(msg, false);
           } else if (currentDataSource === "direct") {
@@ -2087,11 +2563,16 @@
             const fromBroker = (payloadDirect && payloadDirect.ble_positions) ? payloadDirect.ble_positions : {};
             const combinedBle = { ...DIRECT_BEACON_POSITIONS_FALLBACK };
             Object.assign(combinedBle, fromBroker);
-            mergeBeaconsFromRows(combinedBle, (payloadDirect && payloadDirect.rows) ? payloadDirect.rows : []);
+            const directRows = (payloadDirect && payloadDirect.rows) ? payloadDirect.rows.filter((r) => !isIgnoredTracker(r)) : [];
+            mergeBeaconsFromRows(combinedBle, directRows, forceRelink);
+            const strictCombined = applyStrictBeaconInventory(combinedBle);
+            sanitizeBeaconPositions(strictCombined, directRows, {
+              forceAllToNearestTracker: forceRelink
+            });
             updateMarkers([]);
             renderTable([]);
-            updateBeaconMarkersFromSQL(combinedBle, []);
-            let msg = Object.keys(combinedBle).length ? `Direct: ${Object.keys(combinedBle).length} Eyebecons` : "Direct: no beacons";
+            updateBeaconMarkersFromSQL(strictCombined, []);
+            let msg = Object.keys(strictCombined).length ? `Direct: ${Object.keys(strictCombined).length} Eyebecons` : "Direct: no beacons";
             if (!payloadDirect) { msg = "Broker offline - run .\\start_all.ps1 to get beacon data"; setStatus(msg, true); }
             else setStatus(msg, false);
           } else {
@@ -2099,17 +2580,21 @@
             const response = await dataFetch(DATA_SOURCES.motorized_gse);
             if (!response.ok) throw new Error("fetch failed");
             payloadNavixy = await response.json();
-            lastRows = payloadNavixy.rows || [];
+            lastRows = (payloadNavixy.rows || []).filter((r) => !isIgnoredTracker(r));
             if (payloadNavixy.ble_positions && Object.keys(blePositions).length === 0) {
               Object.entries(payloadNavixy.ble_positions).forEach(([mac, pos]) => {
                 blePositions[mac] = { lat: pos.lat, lng: pos.lng, lastTracker: pos.last_tracker_id, lastTrackerLabel: pos.last_tracker_label || "Unknown", lastUpdate: pos.last_update, isPaired: pos.is_paired };
               });
             }
             const combinedBle = { ...(payloadNavixy.ble_positions || {}) };
-            mergeBeaconsFromRows(combinedBle, lastRows);
+            mergeBeaconsFromRows(combinedBle, lastRows, forceRelink);
+            const strictCombined = applyStrictBeaconInventory(combinedBle);
+            sanitizeBeaconPositions(strictCombined, lastRows, {
+              forceAllToNearestTracker: forceRelink
+            });
             updateMarkers(lastRows);
             renderTable(lastRows);
-            updateBeaconMarkersFromSQL(combinedBle, lastRows);
+            updateBeaconMarkersFromSQL(strictCombined, lastRows);
             setStatus(lastRows.length ? `Motorized GSE: ${lastRows.length} trackers` : "Motorized GSE: no trackers");
           }
           hasLoadedOnce = true;
@@ -2120,6 +2605,12 @@
           else setStatus("Motorized GSE: data server unavailable", false);
         } finally {
           loadInProgress = false;
+          if (forceRelink) setRelinkUi(false, "Done");
+          if (forceRelink && relinkStatus) {
+            setTimeout(() => {
+              if (!loadInProgress) relinkStatus.textContent = "";
+            }, 2500);
+          }
         }
       }
 
@@ -2154,6 +2645,16 @@
       }
       document.getElementById("toggleXGpsOptions")?.addEventListener("change", function () { setXGpsVisible(this.checked); });
       document.getElementById("toggleXGps")?.addEventListener("change", function () { setXGpsVisible(this.checked); });
+      relinkButton?.addEventListener("click", async function () {
+        if (loadInProgress) return;
+        clearBeaconRuntimeState();
+        await loadData({ forceRelink: true });
+      });
+      relinkButtonTop?.addEventListener("click", async function () {
+        if (loadInProgress) return;
+        clearBeaconRuntimeState();
+        await loadData({ forceRelink: true });
+      });
 
       fetch("llbg_layers.geojson")
         .then((res) => res.json())
