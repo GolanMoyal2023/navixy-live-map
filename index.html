@@ -556,10 +556,22 @@
       <button class="source-btn active" data-source="both" onclick="switchDataSource('both')">Both</button>
       <div class="data-source-actions">
         <button id="relinkBtnTop" type="button" class="source-action-btn" title="Force beacon re-link to nearest active tracker">Re-link</button>
+        <span id="dropPickStatus" class="options-action-status"></span>
       </div>
     </div>
     <div id="mapView" class="view-panel active">
       <div id="map"></div>
+      <div id="optionsBox" class="map-overlay options-box beacon-legend">
+        <div class="legend-title">Options</div>
+        <label class="beacon-legend-label" title="Show or hide X-GPS (Human Agent) tracker on map">
+          <input type="checkbox" id="toggleXGpsOptions" checked aria-label="X-GPS Object (Human Agent tracker)">
+          <span style="color:#0ea5e9;font-size:14px">📍</span> X-GPS Object (Human Agent tracker)
+        </label>
+        <div class="options-actions">
+          <button id="relinkBtn" type="button" class="options-action-btn" title="Force beacon re-link to live detecting tracker">Re-link</button>
+          <span id="relinkStatus" class="options-action-status"></span>
+        </div>
+      </div>
       <div class="map-overlay">
         <span id="mapStatus">Loading...</span>
         <button id="clearPopup" type="button">Clear</button>
@@ -644,6 +656,18 @@
         }
       })();
       const DATA_SOURCES = window.__NAVIXY_DATA_SOURCES;
+      const URL_PARAMS = new URLSearchParams((typeof location !== "undefined" && location.search) ? location.search : "");
+      const HOSTNAME = (typeof location !== "undefined" && location.hostname) ? String(location.hostname).toLowerCase() : "";
+      const IS_LOCAL_HOST = HOSTNAME === "127.0.0.1" || HOSTNAME === "localhost";
+      const ADMIN_MODE = URL_PARAMS.get("admin") === "1";
+      const ADMIN_WRITE_KEY = URL_PARAMS.get("adminKey") || URL_PARAMS.get("key") || "";
+      const CAN_ADMIN_CONTROLS = IS_LOCAL_HOST ? true : (ADMIN_MODE && ADMIN_WRITE_KEY.length > 0);
+
+      function getAdminHeaders() {
+        if (!CAN_ADMIN_CONTROLS || !ADMIN_WRITE_KEY) return {};
+        return { "X-Admin-Key": ADMIN_WRITE_KEY };
+      }
+
       // No synthetic home fallback positions - render only tracker-linked beacon positions.
       const DIRECT_BEACON_POSITIONS_FALLBACK = {};
       let currentDataSource = "both";
@@ -713,12 +737,14 @@
         "7CD9F407A2DB": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7CD9F4116EE7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
         "7CD9F4106A58": { name: "Beacon 6A58", sn: "", type: "eye_beacon", category: "Uncategorized" },
+        "720EAF059935": { name: "Beacon 9935", sn: "", type: "eye_beacon", category: "Uncategorized" },
         "7cd9f407f95c": { name: "Eybe2plus1", sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
         "7cd9f4003536": { name: "Eybe2plus2", sn: "6204011168", type: "eye_beacon", category: "Equipment" },
         "7cd9f406427b": { name: "EyeBe3", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f407a2db": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f4116ee7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
         "7cd9f4106a58": { name: "Beacon 6A58", sn: "", type: "eye_beacon", category: "Uncategorized" },
+        "720eaf059935": { name: "Beacon 9935", sn: "", type: "eye_beacon", category: "Uncategorized" },
       };
 
       // Category icons and colors (matches seed legend: ◆ Towed, ■▲● Equipment, ★ Safety)
@@ -732,6 +758,10 @@
         "Uncategorized": { shape: "circle", color: "#6b7280", image: null },
       };
       const BLE_ALLOWED_TRACKER_TOKENS = ["skoda", "5032", "6074"];
+      const OUT_OF_SERVICE_BEACON_MACS = new Set([
+        "7cd9f4003536", // broken, out of service
+        "720eaf059935", // unknown/temporary - hide during stabilization phase
+      ]);
       // Fixed business mapping requested by operations:
       // 4 beacons travel together with SKODA, one beacon stays with GSE 5032.
       const FORCED_BEACON_HOST_BY_MAC = {
@@ -739,7 +769,8 @@
         "7cd9f407a2db": "SKODA",
         "7cd9f4116ee7": "SKODA",
         "7cd9f4106a58": "SKODA",
-        "7cd9f4003536": "5032",
+        "720eaf059935": "SKODA",
+        "7cd9f406427b": "5032",
       };
       const STRICT_BEACON_MACS = new Set(Object.keys(FORCED_BEACON_HOST_BY_MAC));
       const BEACON_SHAPE_BY_MAC = {
@@ -747,7 +778,8 @@
         "7cd9f407a2db": "triangle",
         "7cd9f4116ee7": "hexagon",
         "7cd9f4106a58": "pentagon",
-        "7cd9f4003536": "circle",
+        "720eaf059935": "diamond",
+        "7cd9f406427b": "circle",
       };
 
       // Extract beacons from tracker data
@@ -874,6 +906,24 @@
         return s.substring(0, 19);
       }
 
+      function timestampToMs(value) {
+        if (!value) return Number.NaN;
+        const s = String(value).trim();
+        if (!s) return Number.NaN;
+        let ms = Date.parse(s);
+        if (Number.isFinite(ms)) return ms;
+        ms = Date.parse(s.replace(" ", "T"));
+        return Number.isFinite(ms) ? ms : Number.NaN;
+      }
+
+      function preferNewestTimestamp(currentTs, candidateTs) {
+        const currentMs = timestampToMs(currentTs);
+        const candidateMs = timestampToMs(candidateTs);
+        if (!Number.isFinite(currentMs)) return candidateTs || currentTs || null;
+        if (!Number.isFinite(candidateMs)) return currentTs;
+        return candidateMs >= currentMs ? candidateTs : currentTs;
+      }
+
       function beaconPopupHtml(beacon) {
         const typeInfo = BEACON_CATEGORIES[beacon.beaconType] || BEACON_CATEGORIES["default"];
         const catConfig = CATEGORY_CONFIG[beacon.category] || CATEGORY_CONFIG["Uncategorized"];
@@ -924,9 +974,21 @@
           headerIcon = `<span style="font-size:24px;color:white;text-shadow:0 1px 2px rgba(0,0,0,0.3)">${headerSymbol}</span>`;
         }
         
-        const popupLastSeen = formatLastSaw(beacon.lastSeen || beacon.lastSeenAt || beacon.lastUpdate) || "N/A";
-        const popupRssi = beacon.rssi != null && Number.isFinite(Number(beacon.rssi)) ? `${Math.round(Number(beacon.rssi))} dBm` : "N/A";
+        const lastSawText = formatLastSaw(beacon.lastSeenAt || beacon.lastUpdate);
         const pairingSeconds = Math.max(0, Math.floor(Number(beacon.pairingDuration || 0)));
+        const droppedAtText = formatLastSaw(beacon.droppedAt);
+        const dropActions = !CAN_ADMIN_CONTROLS ? "" : (beacon.isDropped
+          ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+               <button type="button" onclick="window.markBeaconDropped('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#2563eb;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Update Drop Here</button>
+               <button type="button" onclick="window.beginBeaconDropPick('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
+               <button type="button" onclick="window.cancelBeaconDropPick()" style="border:0;background:#334155;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Cancel Pick</button>
+               <button type="button" onclick="window.releaseBeaconDrop('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#059669;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Re-attach</button>
+             </div>`
+          : `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+               <button type="button" onclick="window.markBeaconDropped('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#dc2626;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Drop Here (Pin)</button>
+               <button type="button" onclick="window.beginBeaconDropPick('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
+               <button type="button" onclick="window.cancelBeaconDropPick()" style="border:0;background:#334155;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Cancel Pick</button>
+             </div>`);
         return `
           <div class="beacon-popup">
             <div class="beacon-header" style="background:${catConfig.color};color:white;padding:8px 12px;margin:-12px -12px 10px -12px;border-radius:4px 4px 0 0;display:flex;align-items:center;gap:8px;">
@@ -975,17 +1037,19 @@
               <span class="beacon-row-label">~Distance</span>
               <span class="beacon-row-value">~${beacon.estimatedDistance.toFixed(1)} m from ${beacon.hostTrackerLabel}</span>
             </div>` : ""}
-            <div class="beacon-row">
+            ${beacon.lastSeen ? `<div class="beacon-row">
               <span class="beacon-row-label">Last Seen</span>
-              <span class="beacon-row-value">${popupLastSeen}</span>
-            </div>
+              <span class="beacon-row-value">${beacon.lastSeen}</span>
+            </div>` : ""}
             <div class="beacon-host" style="background:#f3f4f6;padding:6px 8px;border-radius:4px;margin-top:8px;">
               <div style="font-weight:600;margin-bottom:4px;">📍 BLE Position Info</div>
               <div>Last set by: <strong>${beacon.lastSeenByTracker || beacon.hostTrackerLabel}</strong></div>
-              <div>Last seen: <strong>${popupLastSeen}</strong></div>
-              <div>Battery: <strong style="color:${batteryColor}">${batteryDisplay}</strong></div>
-              <div>RSSI: <strong>${popupRssi}</strong></div>
+              ${lastSawText ? `<div>Last saw: <strong>${lastSawText}</strong></div>` : ""}
               <div>Last Location: <strong>${latStr}, ${lngStr}</strong></div>
+              ${beacon.isDropped
+                ? `<div style="color:#b91c1c;font-weight:700;">📌 DROPPED IN FIELD</div>${droppedAtText ? `<div>Dropped at: <strong>${droppedAtText}</strong></div>` : ""}${beacon.droppedByTracker ? `<div>Dropped by: <strong>${beacon.droppedByTracker}</strong></div>` : ""}`
+                : ""
+              }
               ${beacon.isPaired ?
                 `<div style="color:#059669;font-weight:600;">🔗 PAIRED (${pairingSeconds}s) - Following tracker</div>` :
                 beacon.pairingDuration > 0 ?
@@ -997,6 +1061,7 @@
                 : (beacon.distanceFromTracker > 0
                   ? `<div>📏 Distance to tracker: <strong>${Math.round(beacon.distanceFromTracker)} m</strong></div>`
                   : '')}
+              ${dropActions}
             </div>
           </div>
         `;
@@ -1014,6 +1079,10 @@
       const blePositions = {};  // { mac: { lat, lng, lastTracker, lastTrackerLabel, lastUpdate, distance, pairingStart } }
       const blePairingTracker = {};  // { mac: trackerId } - which tracker is currently paired
       const blePairingStart = {};  // { mac: timestamp } - when pairing started
+      const latestBeaconSnapshot = {}; // latest rendered beacon state for manual drop pinning
+      const DROPPED_BEACON_STORAGE_KEY = "navixyDroppedBeacons.v1";
+      const droppedBeaconPins = loadDroppedBeaconPins();
+      let pendingDropBeaconMac = null;
       
       const PAIRING_THRESHOLD_MS = 60000;  // 60 seconds to confirm pairing (towing)
       const BLE_STALE_DAYS = 7;  // Keep BLE positions for 7 days
@@ -1022,6 +1091,97 @@
       // Legacy compatibility
       const beaconLastSeen = {};
       const BEACON_STALE_SECONDS = 86400 * 7; // 7 days - BLE keeps position until moved
+
+      function loadDroppedBeaconPins() {
+        try {
+          const raw = localStorage.getItem(DROPPED_BEACON_STORAGE_KEY);
+          if (!raw) return {};
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== "object") return {};
+          const cleaned = {};
+          Object.entries(parsed).forEach(([mac, pin]) => {
+            const lower = String(mac || "").toLowerCase();
+            if (OUT_OF_SERVICE_BEACON_MACS.has(lower)) return;
+            const lat = Number(pin && pin.lat);
+            const lng = Number(pin && pin.lng);
+            if (!lower || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+            cleaned[lower] = {
+              lat,
+              lng,
+              dropped_at: pin.dropped_at || null,
+              dropped_by_tracker: pin.dropped_by_tracker || null,
+            };
+          });
+          return cleaned;
+        } catch (_) {
+          return {};
+        }
+      }
+
+      function persistDroppedBeaconPins() {
+        try {
+          localStorage.setItem(DROPPED_BEACON_STORAGE_KEY, JSON.stringify(droppedBeaconPins));
+        } catch (e) {
+          console.warn("[BLE] Failed to persist dropped beacon pins", e);
+        }
+      }
+
+      function setDropFromCoordinates(mac, lat, lng) {
+        const lower = String(mac || "").toLowerCase();
+        const snap = latestBeaconSnapshot[lower] || {};
+        droppedBeaconPins[lower] = {
+          lat: Number(lat),
+          lng: Number(lng),
+          dropped_at: new Date().toISOString(),
+          dropped_by_tracker: snap.hostTrackerLabel || snap.hostTrackerId || "Unknown",
+        };
+        persistDroppedBeaconPins();
+      }
+
+      window.markBeaconDropped = async function markBeaconDropped(mac) {
+        if (!CAN_ADMIN_CONTROLS) return;
+        const lower = String(mac || "").toLowerCase();
+        const snap = latestBeaconSnapshot[lower];
+        if (!snap || !Number.isFinite(Number(snap.lat)) || !Number.isFinite(Number(snap.lng))) {
+          alert(`No live location available for ${lower}. Drive near beacon and retry.`);
+          return;
+        }
+        setDropFromCoordinates(lower, snap.lat, snap.lng);
+        if (pendingDropBeaconMac === lower) pendingDropBeaconMac = null;
+        setDropPickUi("");
+        await loadData();
+      };
+
+      window.beginBeaconDropPick = function beginBeaconDropPick(mac) {
+        if (!CAN_ADMIN_CONTROLS) return;
+        const lower = String(mac || "").toLowerCase();
+        pendingDropBeaconMac = lower || null;
+        if (pendingDropBeaconMac) {
+          setDropPickUi(`Drop mode: tap map for ${pendingDropBeaconMac.toUpperCase()} (cancel in popup)`);
+        } else {
+          setDropPickUi("");
+        }
+      };
+
+      window.cancelBeaconDropPick = function cancelBeaconDropPick() {
+        if (!CAN_ADMIN_CONTROLS) return;
+        pendingDropBeaconMac = null;
+        setDropPickUi("");
+      };
+
+      window.releaseBeaconDrop = async function releaseBeaconDrop(mac) {
+        if (!CAN_ADMIN_CONTROLS) return;
+        const lower = String(mac || "").toLowerCase();
+        if (pendingDropBeaconMac === lower) {
+          pendingDropBeaconMac = null;
+          setDropPickUi("");
+        }
+        if (droppedBeaconPins[lower]) {
+          delete droppedBeaconPins[lower];
+          persistDroppedBeaconPins();
+        }
+        await loadData({ forceRelink: true });
+      };
       
       // Note: KNOWN_BEACONS already defined above at line 585
       
@@ -1043,6 +1203,7 @@
       const BLE_PATH_LOSS_N = 2.5;   // Path loss exponent (mixed outdoor/near-vehicle environment)
       const BLE_MIN_SPREAD = 2;      // Min 2m visual offset — never stack beacon on tracker icon
       const BLE_MAX_SPREAD = 30;     // Max 30m — conservative cap so ground crew isn't misled
+      const BEACON_FOLLOW_FRESH_MS = 30 * 60 * 1000; // only recent sightings should follow moving tracker
 
       function rssiToMeters(rssi) {
         if (rssi == null || !Number.isFinite(rssi)) return null;
@@ -1063,6 +1224,11 @@
         const smoothed = prev != null ? RSSI_SMOOTH_ALPHA * rawRssi + (1 - RSSI_SMOOTH_ALPHA) * prev : rawRssi;
         beaconRssiSmoothed[mac] = smoothed;
         return smoothed;
+      }
+      function isFreshBeaconSignal(pos) {
+        const ts = pos?.last_seen || pos?.last_update || pos?.updated_at || pos?.updated;
+        const ms = ts ? Date.parse(ts) : NaN;
+        return Number.isFinite(ms) && (Date.now() - ms) <= BEACON_FOLLOW_FRESH_MS;
       }
 
       // ===== RSSI-AWARE BEACON SPREAD =====
@@ -1152,7 +1318,26 @@
 
       function applyStrictBeaconInventory(combinedBle) {
         const filtered = {};
+        // Keep all live beacons from API (for field drop/pickup workflow), not only strict inventory.
+        Object.entries(combinedBle || {}).forEach(([macKey, raw]) => {
+          const lower = String(macKey || "").toLowerCase();
+          if (OUT_OF_SERVICE_BEACON_MACS.has(lower)) return;
+          if (!lower) return;
+          const pos = (raw && typeof raw === "object") ? raw : {};
+          const isStrict = STRICT_BEACON_MACS.has(lower);
+          const includeDynamic = isFreshBeaconSignal(pos) || pos.source_row_detected === true || !!droppedBeaconPins[lower];
+          if (!isStrict && !includeDynamic) return;
+          const known = KNOWN_BEACONS[lower] || KNOWN_BEACONS[lower.toUpperCase()] || {};
+          filtered[lower] = {
+            mac: lower,
+            name: known.name || pos.name || `Beacon ${lower.slice(-4)}`,
+            category: known.category || pos.category || "Uncategorized",
+            type: known.type || pos.type || "eye_beacon",
+            ...pos,
+          };
+        });
         STRICT_BEACON_MACS.forEach((lower) => {
+          if (OUT_OF_SERVICE_BEACON_MACS.has(lower)) return;
           const existing = (combinedBle && (combinedBle[lower] || combinedBle[lower.toUpperCase()])) ? (combinedBle[lower] || combinedBle[lower.toUpperCase()]) : {};
           const known = KNOWN_BEACONS[lower] || KNOWN_BEACONS[lower.toUpperCase()] || {};
           // Always keep required beacons in model even if API omitted one this cycle.
@@ -1225,6 +1410,7 @@
         // Group beacons by detecting tracker for stable angle assignment
         const trackerBeaconGroups = {};
         Object.entries(blePositionsData).forEach(([mac, pos]) => {
+          if (OUT_OF_SERVICE_BEACON_MACS.has(String(mac || "").toLowerCase())) return;
           const tid = pos.last_tracker_id || "unknown";
           if (!trackerBeaconGroups[tid]) trackerBeaconGroups[tid] = [];
           trackerBeaconGroups[tid].push(mac);
@@ -1237,6 +1423,9 @@
         const forcedHostGroups = {};
         Object.keys(FORCED_BEACON_HOST_BY_MAC).forEach((mac) => {
           const lower = String(mac || "").toLowerCase();
+          if (OUT_OF_SERVICE_BEACON_MACS.has(lower)) return;
+          if (droppedBeaconPins[lower]) return; // dropped beacons must not be counted under SKODA/5032 host badge
+          if (!blePositionsData || !Object.prototype.hasOwnProperty.call(blePositionsData, lower)) return;
           const host = findForcedHostTracker(lower, trackerRows);
           if (!host) return;
           forcedHostByMac[lower] = host;
@@ -1252,10 +1441,13 @@
         const renderedMacs = new Set();
         Object.entries(blePositionsData).forEach(([mac, pos]) => {
           const normalizedMac = String(mac || "").toLowerCase();
-          if (!STRICT_BEACON_MACS.has(normalizedMac)) return;
+          if (OUT_OF_SERVICE_BEACON_MACS.has(normalizedMac)) return;
+          const manualDrop = droppedBeaconPins[normalizedMac] || null;
           const forcedHost = forcedHostByMac[normalizedMac] || findForcedHostTracker(mac, trackerRows);
-          const baseLat = Number(forcedHost ? forcedHost.lat : pos.lat);
-          const baseLng = Number(forcedHost ? forcedHost.lng : pos.lng);
+          const signalFresh = isFreshBeaconSignal(pos);
+          const useForcedHost = !!forcedHost && !manualDrop;
+          const baseLat = Number(manualDrop ? manualDrop.lat : (useForcedHost ? forcedHost.lat : pos.lat));
+          const baseLng = Number(manualDrop ? manualDrop.lng : (useForcedHost ? forcedHost.lng : pos.lng));
 
           if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng)) {
             console.log(`[BLE] Skipping ${mac} - no position yet`);
@@ -1268,18 +1460,18 @@
           const group = trackerBeaconGroups[trackerId] || [mac];
           const idx = group.indexOf(mac);
           const totalBeacons = group.length;
-          const rawRssi = pos.rssi != null ? Number(pos.rssi) : null;
+          const rawRssi = signalFresh && pos.rssi != null ? Number(pos.rssi) : null;
           const rssi = smoothRssi(mac, rawRssi);
           const estDistance = rssiToMeters(rssi);
           const pairingSecondsRaw = Math.max(0, Number(pos.pairing_duration || 0));
-          const isForcedHostBeacon = !!forcedHost;
+          const isForcedHostBeacon = useForcedHost;
           const hasLiveRssi = Number.isFinite(rawRssi);
-          const isFollowingTracker = isForcedHostBeacon || (Boolean(pos.is_paired) && pairingSecondsRaw > 0 && hasLiveRssi);
+          const isFollowingTracker = !manualDrop && (isForcedHostBeacon || (Boolean(pos.is_paired) && pairingSecondsRaw > 0 && hasLiveRssi));
           const offset = isForcedHostBeacon
             ? (expandedLayout ? getForcedBeaconHostOffset(baseLat, baseLng, normalizedMac, forcedHost, forcedHostGroups) : { lat: 0, lng: 0 })
             : (isFollowingTracker ? getBeaconRssiOffset(baseLat, rssi, idx, totalBeacons) : { lat: 0, lng: 0 });
-          const lat = baseLat + offset.lat;
-          const lng = baseLng + offset.lng;
+          const lat = manualDrop ? baseLat : (baseLat + offset.lat);
+          const lng = manualDrop ? baseLng : (baseLng + offset.lng);
 
           // Get BLE definition info
           const knownInfo = KNOWN_BEACONS[mac.toUpperCase()] || {};
@@ -1289,7 +1481,7 @@
           const sn = knownInfo.sn || "";
 
           // Get tracker label
-          let trackerLabel = (forcedHost ? forcedHost.label : null) || pos.last_tracker_label ||
+          let trackerLabel = (useForcedHost ? forcedHost.label : null) || pos.last_tracker_label ||
                              (trackerLookup[pos.last_tracker_id] ? trackerLookup[pos.last_tracker_id].label : pos.last_tracker_id) ||
                              "Unknown";
           if (!isAllowedBleTrackerLabel(trackerLabel) && !isAllowedBleTrackerLabel(pos.last_tracker_id)) {
@@ -1311,7 +1503,6 @@
           } else {
             trackerLabel = normalizeTrackerLabel(trackerLabel);
           }
-
           const beacon = {
             mac,
             name,
@@ -1320,16 +1511,25 @@
             sn,
             lat: baseLat, // Show tracker anchor position in popup
             lng: baseLng,
-            battery: (pos.battery != null ? pos.battery : (pos.battery_level != null ? pos.battery_level : pos.battery_percent)),
+            battery: pos.battery,
             isPaired: isFollowingTracker,
             pairingDuration: pairingSecondsRaw,
-            lastUpdate: pos.last_update || pos.last_seen || pos.updated_at || pos.updated,
-            lastSeenAt: pos.last_seen || pos.last_update || pos.updated_at || pos.updated,
-            lastSeen: pos.last_seen || pos.last_update || pos.updated_at || pos.updated,
+            lastUpdate: pos.last_update,
+            lastSeenAt: pos.last_seen || pos.last_update,
+            lastSeen: formatLastSaw(pos.last_seen || pos.last_update),
             hostTrackerId: forcedHost ? forcedHost.id : pos.last_tracker_id,
             hostTrackerLabel: trackerLabel,
             rssi: rssi,
             estimatedDistance: estDistance,
+            isDropped: !!manualDrop,
+            droppedAt: manualDrop ? manualDrop.dropped_at : null,
+            droppedByTracker: manualDrop ? manualDrop.dropped_by_tracker : null,
+          };
+          latestBeaconSnapshot[normalizedMac] = {
+            lat,
+            lng,
+            hostTrackerId: beacon.hostTrackerId,
+            hostTrackerLabel: beacon.hostTrackerLabel,
           };
 
           let marker = beaconMarkers[mac];
@@ -1389,6 +1589,7 @@
           if (!renderedMacs.has(lower)) {
             beaconLayer.removeLayer(beaconMarkers[mac]);
             delete beaconMarkers[mac];
+            delete latestBeaconSnapshot[lower];
           }
         });
 
@@ -1633,8 +1834,6 @@
       let activePopupId = null;
       let isRefreshing = false;
       let lastRows = [];
-      let lastGoodDirectPayload = null;
-      let lastGoodMotorizedPayload = null;
       const TABLE_COLUMNS = [
         { key: "gse", label: "GSE", value: (row) => formatLabel(row) },
         { key: "movement_status", label: "movement_status", value: (row) => formatFieldValue("movement_status", row.movement_status) },
@@ -1732,8 +1931,17 @@
       const relinkButton = document.getElementById("relinkBtn");
       const relinkButtonTop = document.getElementById("relinkBtnTop");
       const relinkStatus = document.getElementById("relinkStatus");
+      const dropPickStatus = document.getElementById("dropPickStatus");
+      const optionsBox = document.getElementById("optionsBox");
       const debugOverlay = document.getElementById("debugOverlay");
       const legendOverlay = document.getElementById("legendOverlay");
+
+      if (!CAN_ADMIN_CONTROLS) {
+        if (relinkButton) relinkButton.style.display = "none";
+        if (relinkButtonTop) relinkButtonTop.style.display = "none";
+        if (dropPickStatus) dropPickStatus.style.display = "none";
+        if (optionsBox) optionsBox.style.display = "none";
+      }
 
       if (clearButton) {
         clearButton.addEventListener("click", () => {
@@ -1746,6 +1954,10 @@
         if (relinkButton) relinkButton.disabled = !!isBusy;
         if (relinkButtonTop) relinkButtonTop.disabled = !!isBusy;
         if (relinkStatus) relinkStatus.textContent = text || "";
+      }
+
+      function setDropPickUi(text) {
+        if (dropPickStatus) dropPickStatus.textContent = text || "";
       }
 
       function isIgnoredTracker(rowOrId, maybeLabel) {
@@ -2356,12 +2568,14 @@
 
       // Save BLE position to database when pairing confirmed
       async function saveBlePosition(mac, data) {
+        if (!CAN_ADMIN_CONTROLS) return;
         try {
           const apiUrl = LIVE_API_URL || DATA_SOURCES.motorized_gse;
           const baseUrl = apiUrl.replace('/data', '');
+          const adminHeaders = getAdminHeaders();
           await fetch(`${baseUrl}/ble/position`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...adminHeaders },
             body: JSON.stringify({
               mac: mac,
               lat: data.lat,
@@ -2390,12 +2604,11 @@
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
           row.beacons.forEach(beacon => {
             const mac = (beacon.mac || "").toLowerCase();
+            if (OUT_OF_SERVICE_BEACON_MACS.has(mac)) return;
             if (!mac) return;
             const existing = combinedBle[mac];
-            const hasStored = existing && Number.isFinite(Number(existing.lat)) && Number.isFinite(Number(existing.lng));
-            if (hasStored && !forceRelink) return;
             const known = KNOWN_BEACONS[mac] || KNOWN_BEACONS[mac.toUpperCase()] || {};
-            const rowLastSeen = beacon.last_seen || beacon.last_update || row.gps_updated || new Date().toISOString();
+            const rowLastSeen = beacon.last_seen || beacon.last_update || new Date().toISOString();
             const fromRow = {
               lat, lng,
               name: known.name || beacon.name || `Beacon ${mac.slice(-4)}`,
@@ -2405,25 +2618,32 @@
               last_tracker_label: row.label || String(row.tracker_id),
               last_update: rowLastSeen,
               last_seen: rowLastSeen,
-              battery: (beacon.battery != null ? beacon.battery : beacon.battery_percent),
               rssi: beacon.rssi,
               is_paired: false,
+              source_row_detected: true,
             };
             // Beacon data (battery, last_update, etc.) comes only from broker; keep broker fields when present
             if (existing && (existing.battery != null || existing.last_update != null)) {
-              const existingHasTelemetry = existing.battery != null || existing.battery_level != null || existing.battery_percent != null || existing.rssi != null;
-              const existingTrackerStr = `${existing.last_tracker_id || ""} ${existing.last_tracker_label || ""}`.toLowerCase();
-              const existingLooksLegacyRutx = existingTrackerStr.includes("rutx11");
+              const newestUpdate = forceRelink
+                ? fromRow.last_update
+                : preferNewestTimestamp(existing.last_update, fromRow.last_update);
+              const newestSeen = forceRelink
+                ? fromRow.last_seen
+                : preferNewestTimestamp(
+                    existing.last_seen || existing.last_update,
+                    fromRow.last_seen || fromRow.last_update
+                  );
               combinedBle[mac] = {
                 ...fromRow,
-                battery: existing.battery != null ? existing.battery : existing.battery_level,
-                last_update: (!existingHasTelemetry && existingLooksLegacyRutx) ? fromRow.last_update : (existing.last_update || fromRow.last_update),
-                last_seen: (!existingHasTelemetry && existingLooksLegacyRutx) ? fromRow.last_seen : (existing.last_seen || existing.last_update || fromRow.last_seen),
-                rssi: existing.rssi != null ? existing.rssi : fromRow.rssi,
-                last_tracker_id: (forceRelink || (!existingHasTelemetry && existingLooksLegacyRutx)) ? fromRow.last_tracker_id : (existing.last_tracker_id ?? fromRow.last_tracker_id),
-                last_tracker_label: (forceRelink || (!existingHasTelemetry && existingLooksLegacyRutx)) ? fromRow.last_tracker_label : (existing.last_tracker_label || fromRow.last_tracker_label),
+                battery: existing.battery,
+                last_update: newestUpdate,
+                last_seen: newestSeen,
+                last_tracker_id: forceRelink ? fromRow.last_tracker_id : (existing.last_tracker_id ?? fromRow.last_tracker_id),
+                last_tracker_label: forceRelink ? fromRow.last_tracker_label : (existing.last_tracker_label || fromRow.last_tracker_label),
+                rssi: (existing.rssi != null ? existing.rssi : fromRow.rssi),
                 is_paired: existing.is_paired,
-                pairing_duration: existing.pairing_duration
+                pairing_duration: existing.pairing_duration,
+                source_row_detected: true,
               };
             } else {
               combinedBle[mac] = fromRow;
@@ -2448,7 +2668,25 @@
 
         const maxAllowedMeters = 2000;
         Object.keys(combinedBle).forEach((mac) => {
+          if (OUT_OF_SERVICE_BEACON_MACS.has(String(mac || "").toLowerCase())) {
+            delete combinedBle[mac];
+            return;
+          }
           const pos = combinedBle[mac] || {};
+          const lower = String(mac || "").toLowerCase();
+          const manualDrop = droppedBeaconPins[lower] || null;
+          if (manualDrop) {
+            combinedBle[mac] = {
+              ...pos,
+              lat: Number(manualDrop.lat),
+              lng: Number(manualDrop.lng),
+              is_paired: false,
+              pairing_duration: 0,
+              last_tracker_label: pos.last_tracker_label,
+              manual_drop: true,
+            };
+            return;
+          }
           const lat = Number(pos.lat);
           const lng = Number(pos.lng);
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
@@ -2500,28 +2738,13 @@
           }
         }
       }
-      async function dataFetch(url) {
-        let lastErr = null;
-        for (let i = 0; i < 2; i++) {
-          try {
-            const headers = {};
-            if (url && url.indexOf("ngrok") !== -1) {
-              headers["ngrok-skip-browser-warning"] = "true";
-            }
-            if (url && url.indexOf(".loca.lt") !== -1) {
-              headers["bypass-tunnel-reminder"] = "true";
-            }
-            const opts = { cache: "no-store" };
-            if (Object.keys(headers).length) opts.headers = headers;
-            const res = await fetch(url, opts);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res;
-          } catch (e) {
-            lastErr = e;
-            await new Promise(r => setTimeout(r, 350));
-          }
-        }
-        throw lastErr || new Error("fetch failed");
+      function dataFetch(url) {
+        const headers = {};
+        if (url && url.indexOf("ngrok") !== -1) headers["ngrok-skip-browser-warning"] = "true";
+        if (url && url.indexOf(".loca.lt") !== -1) headers["bypass-tunnel-reminder"] = "true";
+        Object.assign(headers, getAdminHeaders());
+        const opts = Object.keys(headers).length ? { headers } : {};
+        return fetch(url, opts);
       }
 
       async function loadData(options = {}) {
@@ -2536,29 +2759,12 @@
           let payloadDirect = null;
 
           if (currentDataSource === "both") {
-            const srcMotorized = String(DATA_SOURCES.motorized_gse || "").replace(/\/+$/, "");
-            const srcDirect = String(DATA_SOURCES.direct || "").replace(/\/+$/, "");
-            const sameEndpoint = srcMotorized && srcDirect && srcMotorized === srcDirect;
             const [res1, res2] = await Promise.allSettled([
               dataFetch(DATA_SOURCES.motorized_gse).then(r => r.ok ? r.json() : Promise.reject(new Error("8767 failed"))),
               dataFetch(DATA_SOURCES.direct).then(r => r.ok ? r.json() : Promise.reject(new Error("8768 failed")))
             ]);
             payloadNavixy = res1.status === "fulfilled" ? res1.value : null;
             payloadDirect = res2.status === "fulfilled" ? res2.value : null;
-            if (payloadNavixy) lastGoodMotorizedPayload = payloadNavixy;
-            if (payloadDirect && payloadDirect.ble_positions && Object.keys(payloadDirect.ble_positions).length > 0) {
-              lastGoodDirectPayload = payloadDirect;
-            }
-            // If both sources are configured to the same URL, one transient fetch failure
-            // should not force a false "broker offline" state.
-            if (sameEndpoint) {
-              if (!payloadNavixy && payloadDirect) payloadNavixy = payloadDirect;
-              if (!payloadDirect && payloadNavixy) payloadDirect = payloadNavixy;
-            }
-            if (!payloadNavixy && lastGoodMotorizedPayload) payloadNavixy = lastGoodMotorizedPayload;
-            if ((!payloadDirect || !payloadDirect.ble_positions || Object.keys(payloadDirect.ble_positions).length === 0) && lastGoodDirectPayload) {
-              payloadDirect = lastGoodDirectPayload;
-            }
             lastRows = (payloadNavixy && payloadNavixy.rows) ? payloadNavixy.rows.filter((r) => !isIgnoredTracker(r)) : [];
             if (payloadNavixy && payloadNavixy.ble_positions && Object.keys(blePositions).length === 0) {
               Object.entries(payloadNavixy.ble_positions).forEach(([mac, pos]) => {
@@ -2592,7 +2798,7 @@
             renderTable(lastRows);
             updateBeaconMarkersFromSQL(strictCombined, lastRows);
             let msg = lastRows.length ? `Both: ${lastRows.length} trackers, ${Object.keys(strictCombined).length} beacons` : (payloadNavixy ? "Both: no trackers" : "Broker offline - run .\\start_all.ps1");
-            if (!payloadDirect && Object.keys(strictCombined).length === 0) { msg = "Broker offline - run .\\start_all.ps1 to get beacon data"; setStatus(msg, true); }
+            if (!payloadDirect) { msg = "Broker offline - run .\\start_all.ps1 to get beacon data"; setStatus(msg, true); }
             else setStatus(msg, false);
           } else if (currentDataSource === "direct") {
             try {
@@ -2660,14 +2866,9 @@
       }
       if (typeof location !== "undefined" && location.hostname && location.hostname.indexOf("github.io") !== -1) {
         fetch("api-url.json?t=" + Date.now()).then(function(r){ return r.ok ? r.json() : {}; }).then(function(j){
-          if (j) {
-            // Backward compatible:
-            // - legacy: { dataUrl }
-            // - split sources: { motorizedGseUrl, directUrl } (or dataSources object)
-            var motorized = j.motorizedGseUrl || j.motorized_gse || (j.dataSources && j.dataSources.motorized_gse) || j.dataUrl;
-            var direct = j.directUrl || j.direct_data_url || (j.dataSources && j.dataSources.direct) || j.dataUrl;
-            if (motorized) window.__NAVIXY_DATA_SOURCES.motorized_gse = motorized;
-            if (direct) window.__NAVIXY_DATA_SOURCES.direct = direct;
+          if (j && j.dataUrl) {
+            window.__NAVIXY_DATA_SOURCES.motorized_gse = j.dataUrl;
+            window.__NAVIXY_DATA_SOURCES.direct = j.dataUrl;
           }
           startDataPolling();
         }).catch(function(){ startDataPolling(); });
@@ -2691,14 +2892,28 @@
       document.getElementById("toggleXGpsOptions")?.addEventListener("change", function () { setXGpsVisible(this.checked); });
       document.getElementById("toggleXGps")?.addEventListener("change", function () { setXGpsVisible(this.checked); });
       relinkButton?.addEventListener("click", async function () {
+        if (!CAN_ADMIN_CONTROLS) return;
         if (loadInProgress) return;
         clearBeaconRuntimeState();
         await loadData({ forceRelink: true });
       });
       relinkButtonTop?.addEventListener("click", async function () {
+        if (!CAN_ADMIN_CONTROLS) return;
         if (loadInProgress) return;
         clearBeaconRuntimeState();
         await loadData({ forceRelink: true });
+      });
+      map.on("click", async function (ev) {
+        if (!CAN_ADMIN_CONTROLS) return;
+        const targetMac = pendingDropBeaconMac;
+        if (!targetMac) return;
+        pendingDropBeaconMac = null;
+        setDropFromCoordinates(targetMac, ev.latlng.lat, ev.latlng.lng);
+        setDropPickUi(`Dropped ${targetMac.toUpperCase()} at ${ev.latlng.lat.toFixed(6)}, ${ev.latlng.lng.toFixed(6)}`);
+        await loadData();
+        setTimeout(() => {
+          if (!pendingDropBeaconMac) setDropPickUi("");
+        }, 3500);
       });
 
       fetch("llbg_layers.geojson")
