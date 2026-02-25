@@ -2395,6 +2395,7 @@
             const hasStored = existing && Number.isFinite(Number(existing.lat)) && Number.isFinite(Number(existing.lng));
             if (hasStored && !forceRelink) return;
             const known = KNOWN_BEACONS[mac] || KNOWN_BEACONS[mac.toUpperCase()] || {};
+            const rowLastSeen = beacon.last_seen || beacon.last_update || row.gps_updated || new Date().toISOString();
             const fromRow = {
               lat, lng,
               name: known.name || beacon.name || `Beacon ${mac.slice(-4)}`,
@@ -2402,22 +2403,25 @@
               type: known.type || beacon.beaconType || "eye_beacon",
               last_tracker_id: row.tracker_id,
               last_tracker_label: row.label || String(row.tracker_id),
-              last_update: new Date().toISOString(),
-              last_seen: new Date().toISOString(),
+              last_update: rowLastSeen,
+              last_seen: rowLastSeen,
               battery: (beacon.battery != null ? beacon.battery : beacon.battery_percent),
               rssi: beacon.rssi,
               is_paired: false,
             };
             // Beacon data (battery, last_update, etc.) comes only from broker; keep broker fields when present
             if (existing && (existing.battery != null || existing.last_update != null)) {
+              const existingHasTelemetry = existing.battery != null || existing.battery_level != null || existing.battery_percent != null || existing.rssi != null;
+              const existingTrackerStr = `${existing.last_tracker_id || ""} ${existing.last_tracker_label || ""}`.toLowerCase();
+              const existingLooksLegacyRutx = existingTrackerStr.includes("rutx11");
               combinedBle[mac] = {
                 ...fromRow,
                 battery: existing.battery != null ? existing.battery : existing.battery_level,
-                last_update: existing.last_update || fromRow.last_update,
-                last_seen: existing.last_seen || existing.last_update || fromRow.last_seen,
+                last_update: (!existingHasTelemetry && existingLooksLegacyRutx) ? fromRow.last_update : (existing.last_update || fromRow.last_update),
+                last_seen: (!existingHasTelemetry && existingLooksLegacyRutx) ? fromRow.last_seen : (existing.last_seen || existing.last_update || fromRow.last_seen),
                 rssi: existing.rssi != null ? existing.rssi : fromRow.rssi,
-                last_tracker_id: forceRelink ? fromRow.last_tracker_id : (existing.last_tracker_id ?? fromRow.last_tracker_id),
-                last_tracker_label: forceRelink ? fromRow.last_tracker_label : (existing.last_tracker_label || fromRow.last_tracker_label),
+                last_tracker_id: (forceRelink || (!existingHasTelemetry && existingLooksLegacyRutx)) ? fromRow.last_tracker_id : (existing.last_tracker_id ?? fromRow.last_tracker_id),
+                last_tracker_label: (forceRelink || (!existingHasTelemetry && existingLooksLegacyRutx)) ? fromRow.last_tracker_label : (existing.last_tracker_label || fromRow.last_tracker_label),
                 is_paired: existing.is_paired,
                 pairing_duration: existing.pairing_duration
               };
