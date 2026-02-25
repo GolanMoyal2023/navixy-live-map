@@ -2511,8 +2511,16 @@
         let lastErr = null;
         for (let i = 0; i < 2; i++) {
           try {
-            // Keep requests simple (no custom headers) to avoid CORS preflight failures.
-            const res = await fetch(url, { cache: "no-store" });
+            const headers = {};
+            if (url && url.indexOf("ngrok") !== -1) {
+              headers["ngrok-skip-browser-warning"] = "true";
+            }
+            if (url && url.indexOf(".loca.lt") !== -1) {
+              headers["bypass-tunnel-reminder"] = "true";
+            }
+            const opts = { cache: "no-store" };
+            if (Object.keys(headers).length) opts.headers = headers;
+            const res = await fetch(url, opts);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res;
           } catch (e) {
