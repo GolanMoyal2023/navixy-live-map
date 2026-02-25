@@ -2742,7 +2742,6 @@
         const headers = {};
         if (url && url.indexOf("ngrok") !== -1) headers["ngrok-skip-browser-warning"] = "true";
         if (url && url.indexOf(".loca.lt") !== -1) headers["bypass-tunnel-reminder"] = "true";
-        Object.assign(headers, getAdminHeaders());
         const opts = Object.keys(headers).length ? { headers } : {};
         return fetch(url, opts);
       }
