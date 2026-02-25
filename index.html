@@ -2485,6 +2485,21 @@
         return combinedBle;
       }
 
+      function pruneStaleBeaconEntries(combinedBle) {
+        // Hide legacy ghost entries: no telemetry and no recent sighting.
+        const staleMs = 12 * 60 * 60 * 1000; // 12h
+        const nowMs = Date.now();
+        Object.keys(combinedBle || {}).forEach((mac) => {
+          const pos = combinedBle[mac] || {};
+          const hasTelemetry = pos.battery != null || pos.battery_level != null || pos.battery_percent != null || pos.rssi != null;
+          const ts = pos.last_seen || pos.last_update || pos.updated_at || pos.updated;
+          const seenMs = ts ? Date.parse(ts) : NaN;
+          const fresh = Number.isFinite(seenMs) && (nowMs - seenMs) <= staleMs;
+          if (!hasTelemetry && !fresh) delete combinedBle[mac];
+        });
+        return combinedBle;
+      }
+
       let loadInProgress = false;
       let hasLoadedOnce = false;
       function setStatus(msg, brokerOffline) {
@@ -2588,6 +2603,7 @@
             sanitizeBeaconPositions(strictCombined, lastRows, {
               forceAllToNearestTracker: forceRelink
             });
+            pruneStaleBeaconEntries(strictCombined);
             updateMarkers(lastRows);
             renderTable(lastRows);
             updateBeaconMarkersFromSQL(strictCombined, lastRows);
@@ -2609,6 +2625,7 @@
             sanitizeBeaconPositions(strictCombined, directRows, {
               forceAllToNearestTracker: forceRelink
             });
+            pruneStaleBeaconEntries(strictCombined);
             updateMarkers([]);
             renderTable([]);
             updateBeaconMarkersFromSQL(strictCombined, []);
@@ -2632,6 +2649,7 @@
             sanitizeBeaconPositions(strictCombined, lastRows, {
               forceAllToNearestTracker: forceRelink
             });
+            pruneStaleBeaconEntries(strictCombined);
             updateMarkers(lastRows);
             renderTable(lastRows);
             updateBeaconMarkersFromSQL(strictCombined, lastRows);
