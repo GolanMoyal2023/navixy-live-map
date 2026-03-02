@@ -1047,8 +1047,8 @@
             </div>` : ""}
             <div class="beacon-host" style="background:#f3f4f6;padding:6px 8px;border-radius:4px;margin-top:8px;">
               <div style="font-weight:600;margin-bottom:4px;">📍 BLE Position Info</div>
-              <div>Last set by: <strong>${beacon.lastSeenByTracker || beacon.hostTrackerLabel}</strong></div>
-              ${lastSawText ? `<div>Last saw: <strong>${lastSawText}</strong></div>` : ""}
+              <div>Last seen by: <strong>${beacon.lastSeenByTracker || beacon.hostTrackerLabel}</strong>${beacon.contactType ? ` <span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;color:white;background:${beacon.contactType==='Towing'?'#059669':beacon.contactType==='Dropped Here'?'#b91c1c':'#f59e0b'}">${beacon.contactType}</span>` : ""}</div>
+              ${lastSawText ? `<div>Last seen at: <strong>${lastSawText}</strong></div>` : ""}
               <div>Last Location: <strong>${latStr}, ${lngStr}</strong></div>
               ${beacon.isDropped
                 ? `<div style="color:#b91c1c;font-weight:700;">📌 DROPPED IN FIELD</div>${droppedAtText ? `<div>Dropped at: <strong>${droppedAtText}</strong></div>` : ""}${beacon.droppedByTracker ? `<div>Dropped by: <strong>${beacon.droppedByTracker}</strong></div>` : ""}`
@@ -1519,6 +1519,7 @@
             isPaired: isFollowingTracker,
             pairingDuration: pairingSecondsRaw,
             lastUpdate: pos.last_update,
+            // last_seen = Navixy beacon timestamp (when tracker actually saw it)
             lastSeenAt: pos.last_seen || pos.last_update,
             lastSeen: formatLastSaw(pos.last_seen || pos.last_update),
             hostTrackerId: forcedHost ? forcedHost.id : pos.last_tracker_id,
@@ -1528,6 +1529,8 @@
             isDropped: !!manualDrop,
             droppedAt: manualDrop ? manualDrop.dropped_at : null,
             droppedByTracker: manualDrop ? manualDrop.dropped_by_tracker : null,
+            // Contact type: "Towing" | "Dropped Here" | "Pass Nearby" (from server)
+            contactType: pos.contact_type || null,
           };
           latestBeaconSnapshot[normalizedMac] = {
             lat,
