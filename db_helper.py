@@ -148,32 +148,39 @@ def get_all_ble_positions() -> Dict[str, Dict[str, Any]]:
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        # All columns are directly in BLE_Positions table
         cursor.execute("""
-            SELECT mac, lat, lng, last_tracker_id, last_tracker_label, 
+            SELECT mac, lat, lng, last_tracker_id, last_tracker_label,
                    last_update, is_paired, pairing_start, pairing_duration_sec,
-                   battery_percent, magnet_status, name, category, ble_type, serial_number
+                   battery_percent, magnet_status, name, category, ble_type, serial_number,
+                   rssi, contact_type, last_seen
             FROM BLE_Positions
         """)
-        
+
         positions = {}
         for row in cursor.fetchall():
             mac = row[0].lower() if row[0] else ""
             positions[mac] = {
-                "lat": float(row[1]) if row[1] is not None else None,
-                "lng": float(row[2]) if row[2] is not None else None,
-                "last_tracker_id": str(row[3]) if row[3] else None,
+                "lat":               float(row[1]) if row[1] is not None else None,
+                "lng":               float(row[2]) if row[2] is not None else None,
+                "last_tracker_id":   str(row[3]) if row[3] else None,
                 "last_tracker_label": row[4],
-                "last_update": row[5].isoformat() if row[5] else None,
-                "is_paired": bool(row[6]) if row[6] is not None else False,
-                "pairing_start": row[7].isoformat() if row[7] else None,
-                "pairing_duration_sec": row[8],
-                "battery_percent": row[9],
-                "magnet_status": row[10],
-                "name": row[11],
-                "category": row[12],
-                "type": row[13],
-                "sn": row[14],
+                "last_update":       row[5].isoformat() if row[5] else None,
+                "is_paired":         bool(row[6]) if row[6] is not None else False,
+                "pairing_start":     row[7].isoformat() if row[7] else None,
+                # frontend uses pos.pairing_duration (not pairing_duration_sec)
+                "pairing_duration":  row[8],
+                # frontend uses pos.battery (not battery_percent)
+                "battery":           row[9],
+                "magnet_status":     row[10],
+                "name":              row[11],
+                "category":          row[12],
+                "type":              row[13],
+                "sn":                row[14],
+                "rssi":              float(row[15]) if row[15] is not None else None,
+                "contact_type":      row[16],
+                # last_seen = Navixy beacon timestamp (when tracker actually saw it)
+                # falls back to last_update (DB write time) if not yet populated
+                "last_seen":         row[17].isoformat() if row[17] else (row[5].isoformat() if row[5] else None),
             }
         return positions
     except Exception as e:
@@ -190,45 +197,64 @@ def update_ble_position(
     is_paired: bool = False,
     pairing_start: datetime = None,
     pairing_duration_sec: int = 0,
-    battery_percent: int = None,
+    battery_percent=None,
     magnet_status: str = None,
     log_movement: bool = False,
     old_lat: float = None,
-    old_lng: float = None
+    old_lng: float = None,
+    rssi: float = None,
+    contact_type: str = None,
+    last_seen_navixy: str = None,
 ) -> bool:
     """Update or insert BLE position"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
         mac = mac.lower()
-        
+
+        # Parse last_seen_navixy string → datetime for DB storage
+        last_seen_dt = None
+        if last_seen_navixy:
+            try:
+                last_seen_dt = datetime.strptime(str(last_seen_navixy)[:19], "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+
         # Check if position exists
         cursor.execute("SELECT id, lat, lng FROM BLE_Positions WHERE mac = ?", mac)
         existing = cursor.fetchone()
-        
+
         if existing:
             # Update existing position
             cursor.execute("""
                 UPDATE BLE_Positions
                 SET lat = ?, lng = ?, last_tracker_id = ?, last_tracker_label = ?,
                     last_update = GETDATE(), is_paired = ?, pairing_start = ?,
-                    pairing_duration_sec = ?, battery_percent = ?, magnet_status = ?
+                    pairing_duration_sec = ?,
+                    battery_percent = COALESCE(?, battery_percent),
+                    magnet_status = COALESCE(?, magnet_status),
+                    rssi = COALESCE(?, rssi),
+                    contact_type = COALESCE(?, contact_type),
+                    last_seen = COALESCE(?, last_seen)
                 WHERE mac = ?
             """, lat, lng, tracker_id, tracker_label, is_paired, pairing_start,
-                pairing_duration_sec, battery_percent, magnet_status, mac)
-            
+                pairing_duration_sec, battery_percent, magnet_status,
+                rssi, contact_type, last_seen_dt, mac)
+
             old_lat = existing[1] if old_lat is None else old_lat
             old_lng = existing[2] if old_lng is None else old_lng
         else:
             # Insert new position
             print(f"[DB] Inserting BLE position: mac={mac}, lat={lat}, lng={lng}, tracker={tracker_id}")
             cursor.execute("""
-                INSERT INTO BLE_Positions 
-                (mac, lat, lng, last_tracker_id, last_tracker_label, is_paired, 
-                 pairing_start, pairing_duration_sec, battery_percent, magnet_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO BLE_Positions
+                (mac, lat, lng, last_tracker_id, last_tracker_label, is_paired,
+                 pairing_start, pairing_duration_sec, battery_percent, magnet_status,
+                 rssi, contact_type, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, mac, lat, lng, tracker_id, tracker_label, is_paired,
-                pairing_start, pairing_duration_sec, battery_percent, magnet_status)
+                pairing_start, pairing_duration_sec, battery_percent, magnet_status,
+                rssi, contact_type, last_seen_dt)
             print(f"[DB] Insert executed, rowcount={cursor.rowcount}")
         
         # Log movement if requested and position changed
@@ -250,6 +276,49 @@ def update_ble_position(
         print(f"[DB ERROR] update_ble_position: {e}")
         import traceback
         traceback.print_exc()
+        return False
+
+
+def update_ble_heartbeat(
+    mac: str,
+    battery_percent=None,
+    tracker_id=None,
+    tracker_label: str = None,
+    rssi: float = None,
+    last_seen_navixy: str = None,
+) -> bool:
+    """
+    Lightweight heartbeat update: refresh last_update, battery, rssi, last_seen on every detection.
+    Does NOT change lat/lng position - only updates metadata.
+    Called on every beacon scan so popup always shows fresh 'Last seen at'.
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        mac = mac.lower()
+
+        last_seen_dt = None
+        if last_seen_navixy:
+            try:
+                last_seen_dt = datetime.strptime(str(last_seen_navixy)[:19], "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+
+        cursor.execute("""
+            UPDATE BLE_Positions
+            SET last_update        = GETDATE(),
+                battery_percent    = COALESCE(?, battery_percent),
+                last_tracker_id    = COALESCE(?, last_tracker_id),
+                last_tracker_label = COALESCE(?, last_tracker_label),
+                rssi               = COALESCE(?, rssi),
+                last_seen          = COALESCE(?, last_seen)
+            WHERE mac = ?
+        """, battery_percent, str(tracker_id) if tracker_id else None, tracker_label,
+            rssi, last_seen_dt, mac)
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        print(f"[DB ERROR] update_ble_heartbeat: {e}")
         return False
 
 

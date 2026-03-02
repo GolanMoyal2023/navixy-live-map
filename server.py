@@ -8,7 +8,7 @@ Now with SQL Server integration for BLE position persistence.
 import os
 import time
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 from flask import Flask, jsonify, send_from_directory, request
@@ -27,6 +27,26 @@ API_BASE_URL = os.environ.get("NAVIXY_BASE_URL", "https://api.navixy.com/v2")
 API_HASH = os.environ.get("NAVIXY_API_HASH") or "f038d4c96bfc683cdc52337824f7e5f0"
 
 POLL_TIMEOUT_SECONDS = int(os.environ.get("NAVIXY_TIMEOUT", "10"))
+
+# ── Robust in-memory pairing state ───────────────────────────────────────────
+# Tracks beacon↔tracker pairing across /data polls so we only commit a position
+# once we have 60 s of continuous evidence (not just a single snapshot).
+#
+# Schema per mac key:
+#   tracker_id    : int   – which tracker is currently seeing this beacon
+#   tracker_label : str
+#   first_seen    : datetime – when we first saw this tracker+beacon pair
+#   last_seen     : datetime – most recent detection from Navixy
+#   lat, lng      : float  – tracker position at last_seen
+#   confirmed     : bool   – True once pairing_duration >= PAIRING_CONFIRM_SEC
+#   last_db_write : datetime | None – when we last committed to DB
+# ─────────────────────────────────────────────────────────────────────────────
+_navixy_pairing: Dict[str, Dict[str, Any]] = {}
+
+FRESHNESS_SEC       = 300   # ignore beacons not seen within 5 min
+PAIRING_CONFIRM_SEC = 60    # need 60 s continuous detection to trust position
+DROP_CONFIRM_SEC    = 10    # tracker stopped 10 s → beacon dropped here
+DB_WRITE_INTERVAL   = 120   # throttle DB writes to at most once every 2 min
 
 app = Flask(__name__)
 
@@ -176,33 +196,32 @@ def _extract_beacons(state: Dict[str, Any], readings: Dict[str, Any]) -> List[Di
     """Extract Eye Beacon/Sensor data from tracker state"""
     beacons = []
     additional = state.get("additional", {}) if isinstance(state, dict) else {}
-    
+
     # Check for BLE beacon data
     ble_beacon_id = additional.get("ble_beacon_id", {}).get("value")
     hardware_key = additional.get("hardware_key", {}).get("value")
-    
+
     # Get the MAC address (last 12 chars of the full ID)
     beacon_mac = None
     if ble_beacon_id:
         beacon_mac = ble_beacon_id[-12:].upper() if len(ble_beacon_id) >= 12 else ble_beacon_id.upper()
     elif hardware_key:
         beacon_mac = hardware_key[-12:].upper() if len(hardware_key) >= 12 else hardware_key.upper()
-    
+
     if beacon_mac:
         # Get last seen timestamp
         last_seen = additional.get("ble_beacon_id", {}).get("updated") or additional.get("hardware_key", {}).get("updated")
-        
+
         # Filter out old beacon data (more than 24 hours old)
         if last_seen:
-            from datetime import datetime, timedelta
             try:
                 last_seen_dt = datetime.strptime(last_seen, "%Y-%m-%d %H:%M:%S")
                 if datetime.now() - last_seen_dt > timedelta(hours=24):
                     # Skip old beacon data
                     return beacons
-            except:
+            except Exception:
                 pass
-        
+
         # Get beacon battery from virtual sensors
         battery = None
         for vs in readings.get("virtual_sensors", []) or []:
@@ -210,22 +229,45 @@ def _extract_beacons(state: Dict[str, Any], readings: Dict[str, Any]) -> List[Di
             if "eyebecon" in label or "eye beacon" in label or "ble" in label:
                 battery = vs.get("value")
                 break
-        
+
+        # Fallback: voltage from additional fields (Eye Beacons report raw voltage 2.0–3.0V)
+        if battery is None:
+            for vol_key in ("ble_beacon_voltage", "ble_voltage"):
+                val = additional.get(vol_key, {})
+                if isinstance(val, dict) and val.get("value") is not None:
+                    try:
+                        battery = float(val["value"])
+                    except (TypeError, ValueError):
+                        pass
+                    break
+
+        # Extract RSSI (signal strength dBm) from additional fields
+        rssi = None
+        for rssi_key in ("ble_beacon_rssi", "ble_rssi", "ble_beacon_signal"):
+            val = additional.get(rssi_key, {})
+            if isinstance(val, dict) and val.get("value") is not None:
+                try:
+                    rssi = float(val["value"])
+                except (TypeError, ValueError):
+                    pass
+                break
+
         # Get magnet sensor states
         magnet_sensors = {}
         for i in range(1, 5):
             key = f"ble_magnet_sensor_{i}"
             if key in additional:
                 magnet_sensors[f"magnet_{i}"] = additional[key].get("value")
-        
+
         beacon = {
-            "mac": beacon_mac,
-            "battery": battery,
+            "mac":           beacon_mac,
+            "battery":       battery,
+            "rssi":          rssi,
             "magnet_sensors": magnet_sensors,
-            "last_seen": last_seen,
+            "last_seen":     last_seen,
         }
         beacons.append(beacon)
-    
+
     return beacons
 
 
@@ -296,12 +338,131 @@ def _build_row(tracker: Dict[str, Any], state: Dict[str, Any], readings: Dict[st
             "Ignition__updated": ignition_updated,
         }
     )
-    
+
     # Add beacon data
     beacons = _extract_beacons(state, readings)
     row["beacons"] = beacons
-    
+
     return row
+
+
+def _track_beacon_position(
+    mac: str,
+    beacon: Dict[str, Any],
+    tracker_id: int,
+    tracker_lbl: str,
+    tracker_lat: Any,
+    tracker_lng: Any,
+    tracker_spd: float,
+    ble_definitions: Dict[str, Any],
+    now: datetime,
+) -> None:
+    """
+    Robust in-memory pairing tracker.
+
+    Rules:
+      • Beacon must be freshly seen (last_seen age < FRESHNESS_SEC).
+      • Same tracker must continuously see the beacon for PAIRING_CONFIRM_SEC (60 s)
+        before we write the position to DB.
+      • While moving (speed > 2 km/h): update position every DB_WRITE_INTERVAL seconds.
+      • When stopped (speed < 2 km/h) and pairing_duration >= DROP_CONFIRM_SEC (10 s):
+        write a "dropped here" position immediately (but still throttled to DB_WRITE_INTERVAL).
+      • If a different tracker starts seeing the beacon the pairing resets.
+      • Stale entries (last_seen older than FRESHNESS_SEC) are pruned on each /data call.
+    """
+    beacon_name = ble_definitions.get(mac, {}).get("name", mac)
+
+    # Parse Navixy last_seen timestamp
+    last_seen_str = beacon.get("last_seen")
+    if not last_seen_str:
+        return
+    try:
+        last_seen_dt = datetime.strptime(str(last_seen_str)[:19], "%Y-%m-%d %H:%M:%S")
+        age_sec = (now - last_seen_dt).total_seconds()
+    except Exception:
+        return  # unparseable timestamp – skip
+
+    if age_sec > FRESHNESS_SEC:
+        return  # stale Navixy reading – don't update pairing
+
+    entry = _navixy_pairing.get(mac)
+
+    if entry is None or entry.get("tracker_id") != tracker_id:
+        # New pairing (or tracker changed) – start the 60-second clock
+        _navixy_pairing[mac] = {
+            "tracker_id":    tracker_id,
+            "tracker_label": tracker_lbl,
+            "first_seen":    now,
+            "last_seen":     now,
+            "lat":           tracker_lat,
+            "lng":           tracker_lng,
+            "confirmed":     False,
+            "last_db_write": None,
+        }
+        print(f"[BLE-PAIR] {mac} ({beacon_name}) - new pairing started with {tracker_lbl}")
+        return  # wait for next poll to accumulate duration
+
+    # Same tracker – extend the pairing window
+    entry["last_seen"] = now
+    entry["lat"]       = tracker_lat
+    entry["lng"]       = tracker_lng
+
+    pairing_duration = (entry["last_seen"] - entry["first_seen"]).total_seconds()
+    is_moving  = tracker_spd > 2
+    is_stopped = tracker_spd <= 2
+
+    # Determine contact type label for popup display
+    if is_moving and pairing_duration >= PAIRING_CONFIRM_SEC:
+        contact_type = "Towing"
+    elif is_stopped and pairing_duration >= DROP_CONFIRM_SEC:
+        contact_type = "Dropped Here"
+    else:
+        contact_type = "Pass Nearby"
+
+    # Decide whether to commit position to DB
+    should_write = False
+    write_reason = ""
+
+    if is_moving and pairing_duration >= PAIRING_CONFIRM_SEC:
+        last_write = entry.get("last_db_write")
+        if last_write is None or (now - last_write).total_seconds() >= DB_WRITE_INTERVAL:
+            should_write = True
+            write_reason = f"MOVING {pairing_duration:.0f}s"
+            entry["confirmed"] = True
+
+    elif is_stopped and pairing_duration >= DROP_CONFIRM_SEC:
+        last_write = entry.get("last_db_write")
+        if last_write is None or (now - last_write).total_seconds() >= DB_WRITE_INTERVAL:
+            should_write = True
+            write_reason = f"DROPPED {pairing_duration:.0f}s"
+            entry["confirmed"] = True
+
+    if not should_write or not DB_ENABLED:
+        return
+
+    try:
+        db_helper.update_ble_position(
+            mac=mac,
+            lat=float(tracker_lat),
+            lng=float(tracker_lng),
+            tracker_id=tracker_id,
+            tracker_label=tracker_lbl,
+            is_paired=is_moving,
+            pairing_duration_sec=int(pairing_duration),
+            battery_percent=beacon.get("battery"),
+            magnet_status=None,
+            rssi=beacon.get("rssi"),
+            contact_type=contact_type,
+            last_seen_navixy=last_seen_str,
+        )
+        entry["last_db_write"] = now
+        print(
+            f"[BLE-TRACK] {mac} ({beacon_name}) -> "
+            f"({float(tracker_lat):.5f}, {float(tracker_lng):.5f}) "
+            f"{write_reason} [{contact_type}] via {tracker_lbl}"
+        )
+    except Exception as e:
+        print(f"[BLE-TRACK] DB error for {mac}: {e}")
 
 
 @app.get("/")
@@ -328,7 +489,7 @@ def ble_positions() -> Any:
     """Get all BLE positions from database"""
     if not DB_ENABLED:
         return jsonify({"success": False, "error": "Database not available", "positions": {}})
-    
+
     try:
         positions = db_helper.get_all_ble_positions()
         return jsonify({"success": True, "positions": positions, "count": len(positions)})
@@ -337,11 +498,11 @@ def ble_positions() -> Any:
 
 
 @app.get("/ble/definitions")
-def ble_definitions() -> Any:
+def ble_definitions_endpoint() -> Any:
     """Get all BLE definitions from database"""
     if not DB_ENABLED:
         return jsonify({"success": False, "error": "Database not available", "definitions": {}})
-    
+
     try:
         definitions = db_helper.get_ble_definitions()
         return jsonify({"success": True, "definitions": definitions, "count": len(definitions)})
@@ -354,29 +515,29 @@ def update_ble_position() -> Any:
     """Update BLE position (called by client when pairing confirmed)"""
     if request.method == "OPTIONS":
         return "", 200
-    
+
     if not DB_ENABLED:
         return jsonify({"success": False, "error": "Database not available"})
-    
+
     data = request.get_json()
-    
+
     if not data:
         return jsonify({"success": False, "error": "No data provided"})
-    
+
     mac = data.get("mac", "").lower()
     if not mac:
         return jsonify({"success": False, "error": "MAC address required"})
-    
+
     try:
         # Get old position for movement logging
         old_pos = db_helper.get_ble_position(mac)
         old_lat = old_pos["lat"] if old_pos else None
         old_lng = old_pos["lng"] if old_pos else None
-        
+
         pairing_start = None
         if data.get("pairing_start"):
             pairing_start = datetime.fromisoformat(data["pairing_start"])
-        
+
         success = db_helper.update_ble_position(
             mac=mac,
             lat=float(data.get("lat", 0)),
@@ -392,10 +553,23 @@ def update_ble_position() -> Any:
             old_lat=old_lat,
             old_lng=old_lng
         )
-        
+
         return jsonify({"success": success})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
+
+@app.get("/ble/pairing_state")
+def ble_pairing_state() -> Any:
+    """Debug endpoint – show current in-memory pairing state"""
+    state = {}
+    for mac, entry in _navixy_pairing.items():
+        e = dict(entry)
+        for k in ("first_seen", "last_seen", "last_db_write"):
+            if e.get(k) is not None:
+                e[k] = e[k].isoformat()
+        state[mac] = e
+    return jsonify({"success": True, "pairing_state": state, "count": len(state)})
 
 
 @app.get("/data")
@@ -409,13 +583,23 @@ def data() -> Any:
             {"success": False, "error": trackers_resp.get("status", {}).get("description"), "rows": []}
         ), 502
 
-    # Load BLE definitions from database
-    ble_definitions = {}
+    # Load BLE definitions from database (once per /data call)
+    ble_defs: Dict[str, Any] = {}
     if DB_ENABLED:
         try:
-            ble_definitions = db_helper.get_ble_definitions()
-        except:
+            ble_defs = db_helper.get_ble_definitions()
+        except Exception:
             pass
+
+    # Snapshot of wall-clock time for this entire /data call
+    now = datetime.now()
+
+    # ── Prune stale pairing entries ──────────────────────────────────────────
+    for _mac in list(_navixy_pairing):
+        entry_age = (now - _navixy_pairing[_mac]["last_seen"]).total_seconds()
+        if entry_age > FRESHNESS_SEC:
+            print(f"[BLE-PAIR] {_mac} pairing expired (last seen {entry_age:.0f}s ago)")
+            del _navixy_pairing[_mac]
 
     rows: List[Dict[str, Any]] = []
     for tracker in trackers_resp.get("list", []):
@@ -428,7 +612,7 @@ def data() -> Any:
         readings_resp = _api_call("tracker/readings/list", {"tracker_id": tracker_id})
         readings = readings_resp if readings_resp.get("success") else {}
         row = _build_row(tracker, state_resp.get("state", {}), readings)
-        
+
         # Store tracker position in database
         if DB_ENABLED and row.get("lat") and row.get("lng"):
             try:
@@ -442,34 +626,83 @@ def data() -> Any:
                 )
             except Exception as e:
                 print(f"[DB] Error saving tracker {tracker_id}: {e}")
-        
-        # Enrich beacon data with database info and store positions
+
+        # ── Enrich beacons + robust position tracking ─────────────────────
+        tracker_lat = row.get("lat")
+        tracker_lng = row.get("lng")
+        tracker_spd = float(row.get("speed") or 0)
+        tracker_lbl = row.get("label", "")
+
         for beacon in row.get("beacons", []):
             mac = beacon.get("mac", "").lower()
-            if mac and mac in ble_definitions:
+
+            # Enrich beacon with known definition metadata
+            if mac and mac in ble_defs:
                 beacon.update({
-                    "name": ble_definitions[mac].get("name"),
-                    "category": ble_definitions[mac].get("category"),
-                    "beaconType": ble_definitions[mac].get("type"),
-                    "sn": ble_definitions[mac].get("sn"),
+                    "name":       ble_defs[mac].get("name"),
+                    "category":   ble_defs[mac].get("category"),
+                    "beaconType": ble_defs[mac].get("type"),
+                    "sn":         ble_defs[mac].get("sn"),
                 })
-            
-            # Note: BLE position storage is handled by the client-side 60-second pairing logic
-            # The server just provides the current detection data
-        
+
+            # Heartbeat: refresh last_update, battery, RSSI, last_seen on every detection
+            # (keeps popup "Last seen at" fresh even for non-paired beacons)
+            if mac and DB_ENABLED:
+                try:
+                    db_helper.update_ble_heartbeat(
+                        mac=mac,
+                        battery_percent=beacon.get("battery"),
+                        rssi=beacon.get("rssi"),
+                        last_seen_navixy=beacon.get("last_seen"),
+                        tracker_id=tracker_id,
+                        tracker_label=tracker_lbl,
+                    )
+                except Exception:
+                    pass
+
+            # Only track position for known beacons on a tracker with valid GPS
+            if not (mac and mac in ble_defs and tracker_lat and tracker_lng):
+                continue
+
+            _track_beacon_position(
+                mac=mac,
+                beacon=beacon,
+                tracker_id=tracker_id,
+                tracker_lbl=tracker_lbl,
+                tracker_lat=tracker_lat,
+                tracker_lng=tracker_lng,
+                tracker_spd=tracker_spd,
+                ble_definitions=ble_defs,
+                now=now,
+            )
+
         rows.append(row)
         time.sleep(0.05)
 
     # Add stored BLE positions to response for persistence across page loads
-    stored_ble_positions = {}
+    stored_ble_positions: Dict[str, Any] = {}
     if DB_ENABLED:
         try:
             stored_ble_positions = db_helper.get_all_ble_positions()
-        except:
+        except Exception:
             pass
 
+    # Merge live RSSI / battery / last_seen from this scan into stored positions
+    # (so popup shows real-time values even between confirmed position writes)
+    for row in rows:
+        for beacon in row.get("beacons", []):
+            mac_lc = (beacon.get("mac") or "").lower()
+            if mac_lc and mac_lc in stored_ble_positions:
+                pos = stored_ble_positions[mac_lc]
+                if beacon.get("rssi") is not None:
+                    pos["rssi"] = beacon["rssi"]
+                if beacon.get("battery") is not None:
+                    pos["battery"] = beacon["battery"]
+                if beacon.get("last_seen"):
+                    pos["last_seen"] = beacon["last_seen"]
+
     return jsonify({
-        "success": True, 
+        "success": True,
         "rows": rows,
         "ble_positions": stored_ble_positions,
         "db_enabled": DB_ENABLED
