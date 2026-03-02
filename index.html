@@ -737,7 +737,6 @@
         "7CD9F407A2DB": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7CD9F4116EE7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
         "7CD9F4106A58": { name: "EyeSen6A58", sn: "", type: "eye_sensor", category: "Safety" },
-        "CCF8BC4D1006": { name: "Beacon1006", sn: "", type: "eye_beacon", category: "Equipment" },
         "720EAF059935": { name: "Beacon 9935", sn: "", type: "eye_beacon", category: "Uncategorized" },
         "7cd9f407f95c": { name: "Eybe2plus1", sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
         "7cd9f4003536": { name: "Eybe2plus2", sn: "6204011168", type: "eye_beacon", category: "Equipment" },
@@ -745,7 +744,6 @@
         "7cd9f407a2db": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f4116ee7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
         "7cd9f4106a58": { name: "EyeSen6A58", sn: "", type: "eye_sensor", category: "Safety" },
-        "ccf8bc4d1006": { name: "Beacon1006", sn: "", type: "eye_beacon", category: "Equipment" },
         "720eaf059935": { name: "Beacon 9935", sn: "", type: "eye_beacon", category: "Uncategorized" },
       };
 
@@ -763,6 +761,7 @@
       const OUT_OF_SERVICE_BEACON_MACS = new Set([
         "7cd9f4003536", // broken, out of service
         "720eaf059935", // unknown/temporary - hide during stabilization phase
+        "ccf8bc4d1006", // simulation-only beacon, not a known permanent device
       ]);
       // Fixed business mapping requested by operations:
       // 4 beacons travel together with SKODA, one beacon stays with GSE 5032.
@@ -773,7 +772,6 @@
         "7cd9f4106a58": "SKODA",
         "720eaf059935": "SKODA",
         "7cd9f406427b": "5032",
-        "ccf8bc4d1006": "5032",
       };
       const STRICT_BEACON_MACS = new Set(Object.keys(FORCED_BEACON_HOST_BY_MAC));
       const BEACON_SHAPE_BY_MAC = {
@@ -783,7 +781,6 @@
         "7cd9f4106a58": "pentagon",
         "720eaf059935": "diamond",
         "7cd9f406427b": "circle",
-        "ccf8bc4d1006": "star",
       };
 
       // Extract beacons from tracker data
