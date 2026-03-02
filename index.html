@@ -736,14 +736,16 @@
         "7CD9F406427B": { name: "EyeBe3", sn: "", type: "eye_beacon", category: "Equipment" },
         "7CD9F407A2DB": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7CD9F4116EE7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
-        "7CD9F4106A58": { name: "Beacon 6A58", sn: "", type: "eye_beacon", category: "Uncategorized" },
+        "7CD9F4106A58": { name: "EyeSen6A58", sn: "", type: "eye_sensor", category: "Safety" },
+        "8670FC031006": { name: "Beacon1006", sn: "", type: "eye_beacon", category: "Equipment" },
         "720EAF059935": { name: "Beacon 9935", sn: "", type: "eye_beacon", category: "Uncategorized" },
         "7cd9f407f95c": { name: "Eybe2plus1", sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
         "7cd9f4003536": { name: "Eybe2plus2", sn: "6204011168", type: "eye_beacon", category: "Equipment" },
         "7cd9f406427b": { name: "EyeBe3", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f407a2db": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f4116ee7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
-        "7cd9f4106a58": { name: "Beacon 6A58", sn: "", type: "eye_beacon", category: "Uncategorized" },
+        "7cd9f4106a58": { name: "EyeSen6A58", sn: "", type: "eye_sensor", category: "Safety" },
+        "8670fc031006": { name: "Beacon1006", sn: "", type: "eye_beacon", category: "Equipment" },
         "720eaf059935": { name: "Beacon 9935", sn: "", type: "eye_beacon", category: "Uncategorized" },
       };
 
@@ -771,6 +773,7 @@
         "7cd9f4106a58": "SKODA",
         "720eaf059935": "SKODA",
         "7cd9f406427b": "5032",
+        "8670fc031006": "5032",
       };
       const STRICT_BEACON_MACS = new Set(Object.keys(FORCED_BEACON_HOST_BY_MAC));
       const BEACON_SHAPE_BY_MAC = {
@@ -780,6 +783,7 @@
         "7cd9f4106a58": "pentagon",
         "720eaf059935": "diamond",
         "7cd9f406427b": "circle",
+        "8670fc031006": "star",
       };
 
       // Extract beacons from tracker data
