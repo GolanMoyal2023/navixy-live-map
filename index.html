@@ -978,20 +978,21 @@
         const lastSawText = formatLastSaw(beacon.lastSeenAt || beacon.lastUpdate);
         const pairingSeconds = Math.max(0, Math.floor(Number(beacon.pairingDuration || 0)));
         const droppedAtText = formatLastSaw(beacon.droppedAt);
-        const dropActions = !CAN_ADMIN_CONTROLS ? "" : (beacon.isDropped
-          ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
-               <button type="button" onclick="window.dropBeaconAtMyLocation('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#16a34a;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">📍 My Location</button>
-               <button type="button" onclick="window.markBeaconDropped('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#2563eb;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Update Drop Here</button>
-               <button type="button" onclick="window.beginBeaconDropPick('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
+        // "📍 My Location" is visible to ALL users (phone GPS, no admin needed).
+        // Other buttons (pick coords, re-attach) require admin access.
+        const _bmac = String(beacon.mac || "").toLowerCase();
+        const _adminOnlyBtns = !CAN_ADMIN_CONTROLS ? "" : (beacon.isDropped
+          ? `<button type="button" onclick="window.markBeaconDropped('${_bmac}')" style="border:0;background:#2563eb;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Update Drop Here</button>
+               <button type="button" onclick="window.beginBeaconDropPick('${_bmac}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
                <button type="button" onclick="window.cancelBeaconDropPick()" style="border:0;background:#334155;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Cancel Pick</button>
-               <button type="button" onclick="window.releaseBeaconDrop('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#059669;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Re-attach</button>
-             </div>`
-          : `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
-               <button type="button" onclick="window.dropBeaconAtMyLocation('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#16a34a;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">📍 My Location</button>
-               <button type="button" onclick="window.markBeaconDropped('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#dc2626;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Drop Here (Pin)</button>
-               <button type="button" onclick="window.beginBeaconDropPick('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
-               <button type="button" onclick="window.cancelBeaconDropPick()" style="border:0;background:#334155;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Cancel Pick</button>
-             </div>`);
+               <button type="button" onclick="window.releaseBeaconDrop('${_bmac}')" style="border:0;background:#059669;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Re-attach</button>`
+          : `<button type="button" onclick="window.markBeaconDropped('${_bmac}')" style="border:0;background:#dc2626;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Drop Here (Pin)</button>
+               <button type="button" onclick="window.beginBeaconDropPick('${_bmac}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
+               <button type="button" onclick="window.cancelBeaconDropPick()" style="border:0;background:#334155;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Cancel Pick</button>`);
+        const dropActions = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+               <button type="button" onclick="window.dropBeaconAtMyLocation('${_bmac}')" style="border:0;background:#16a34a;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">📍 My Location</button>
+               ${_adminOnlyBtns}
+             </div>`;
         return `
           <div class="beacon-popup">
             <div class="beacon-header" style="background:${catConfig.color};color:white;padding:8px 12px;margin:-12px -12px 10px -12px;border-radius:4px 4px 0 0;display:flex;align-items:center;gap:8px;">
@@ -1158,8 +1159,8 @@
       // ── 📍 Drop beacon at phone's current GPS location ───────────────────────
       // Uses browser Geolocation API (phone GPS ~5m accuracy).
       // Saves to DB via POST /ble/position so ALL devices see the correct location.
+      // No CAN_ADMIN_CONTROLS guard here — phone GPS drop is available to all users.
       window.dropBeaconAtMyLocation = async function dropBeaconAtMyLocation(mac) {
-        if (!CAN_ADMIN_CONTROLS) return;
         const lower = String(mac || "").toLowerCase();
         if (!navigator.geolocation) {
           alert("Geolocation is not supported by this browser.");
