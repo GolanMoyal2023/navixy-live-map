@@ -63,7 +63,7 @@ PAIRING_THRESHOLD_SEC = 60      # 60 seconds for towing confirmation (STABLE)
 GPS_DRIFT_THRESHOLD_M = 30      # Ignore movements < 30m (GPS drift filter)
 GAP_THRESHOLD_SEC = 300         # 5 minutes = detection gap (assets don't move often)
 SIGNIFICANT_MOVE_M = 100        # Movement > 100m after gap = confirmed new placement
-MAX_SPEED_KMH = 5               # Only update position when speed < 5 km/h (stopped/slow)
+MAX_SPEED_KMH = 25              # Airport max speed - allow position updates up to 25 km/h (towing speed)
 
 # STABILITY MODE: Only update position on VERY clear towing events
 STABILITY_MODE = True
@@ -80,7 +80,13 @@ ble_positions: Dict[str, Dict[str, Any]] = {}
 # BLE pairing tracking: { mac: { tracker_imei, start_time } }
 ble_pairing: Dict[str, Dict[str, Any]] = {}
 
-# Known BLE definitions - YOUR 5 BEACONS
+# RSSI tracker map: tracks which trackers see each beacon and at what signal strength
+# { mac: { imei: { rssi, lat, lng, last_seen } } }
+# Used to select the closest (best RSSI) tracker when multiple trackers see the same beacon
+# Best RSSI = least negative (e.g. -35 dBm is closer/better than -55 dBm)
+ble_rssi_map: Dict[str, Dict[str, Any]] = {}
+
+# Known BLE definitions - YOUR 7 BEACONS
 # Only these will be tracked, all others ignored
 ble_definitions: Dict[str, Dict[str, Any]] = {
     # Full MACs (lowercase)
@@ -90,13 +96,21 @@ ble_definitions: Dict[str, Dict[str, Any]] = {
     # New beacons added
     "7cd9f406427b": {"name": "EyeBe3", "category": "Equipment", "type": "eye_beacon", "sn": ""},
     "7cd9f407a2db": {"name": "EyeBe4", "category": "Equipment", "type": "eye_beacon", "sn": ""},
+    # Eye Sensor with temperature / humidity / movement (added 2026-03-02)
+    "7cd9f4106a58": {"name": "EyeSen6A58", "category": "Safety", "type": "eye_sensor", "sn": ""},
+    # Airport beacon detected by LY_GSE_5032 on 2026-03-02 (different OUI: 8670fc)
+    "8670fc031006": {"name": "Beacon1006", "category": "Equipment", "type": "eye_beacon", "sn": ""},
 }
 
 # Partial MAC patterns to match (for different CODEC8 formats)
 KNOWN_MAC_PATTERNS = [
-    "7cd9f407f95c", "7cd9f4003536", "7cd9f4116ee7", "7cd9f406427b", "7cd9f407a2db",  # Full
-    "7cd9f407", "7cd9f400", "7cd9f411", "7cd9f406",  # 8-char prefix
-    "f407f95c", "f4003536", "f4116ee7", "f406427b", "f407a2db",  # 8-char suffix
+    "7cd9f407f95c", "7cd9f4003536", "7cd9f4116ee7", "7cd9f406427b", "7cd9f407a2db",
+    "7cd9f4106a58",  # EyeSen6A58 – Eye Sensor (temp/humidity/movement)
+    "8670fc031006",  # Beacon1006 – Airport beacon (different OUI)
+    "7cd9f407", "7cd9f400", "7cd9f411", "7cd9f406", "7cd9f410",  # 8-char prefixes
+    "8670fc03",  # Beacon1006 prefix
+    "f407f95c", "f4003536", "f4116ee7", "f406427b", "f407a2db", "f4106a58",  # 8-char suffixes
+    "fc031006",  # Beacon1006 suffix
 ]
 
 def match_known_beacon(mac: str, debug: bool = True) -> Optional[str]:
@@ -113,7 +127,7 @@ def match_known_beacon(mac: str, debug: bool = True) -> Optional[str]:
     if mac in ble_definitions:
         return mac
     
-    # Check ALL known beacons (5 total)
+    # Check ALL known beacons
     all_known_macs = list(ble_definitions.keys())
     
     for full_mac in all_known_macs:
@@ -175,6 +189,37 @@ def match_known_beacon(mac: str, debug: bool = True) -> Optional[str]:
         logger.info(f"NEAR-MATCH: {original_mac} - consider adding to known beacons")
     
     return None  # Not a known beacon
+
+# ============================================================
+# BATTERY CONVERSION UTILITY
+# ============================================================
+def ble_battery_to_percent(raw_value) -> Optional[int]:
+    """
+    Convert Eye Beacon / Eye Sensor battery raw value to a 0-100 percent integer.
+
+    Teltonika transmits battery in one of two ways depending on firmware:
+      • IO element 548 (fixed 2-byte uint16): millivolts, e.g. 2830 = 2.83 V
+      • Element 385 beacon byte: percentage 0-100 (standard) OR
+        voltage in 100 mV units, e.g. 28 = 2.8 V (older firmware)
+
+    Li primary cell curve used: 2.0 V = 0 %, 3.3 V = 100 %.
+    """
+    if raw_value is None:
+        return None
+    try:
+        v = int(raw_value)
+    except (TypeError, ValueError):
+        return None
+    if v < 0:
+        return None
+    # millivolts encoding (IO element 548): values like 2830 or 3050
+    if v >= 1000:
+        voltage = v / 1000.0
+        pct = int((voltage - 2.0) / (3.3 - 2.0) * 100)
+        return max(0, min(100, pct))
+    # Standard percentage 0-100 (most common from element 385)
+    return max(0, min(100, v))
+
 
 # Thread lock for data access
 data_lock = threading.Lock()
@@ -388,8 +433,12 @@ class Codec8Parser:
             data_hex = data.hex().lower()
             
             # Search for known beacon MAC patterns
-            known_macs = ["7cd9f407f95c", "7cd9f407a2db", "7cd9f4003536", "7cd9f4116ee7", "7cd9f406427b"]
-            
+            known_macs = [
+                "7cd9f407f95c", "7cd9f407a2db", "7cd9f4003536",
+                "7cd9f4116ee7", "7cd9f406427b", "7cd9f4106a58",  # EyeSen6A58
+                "8670fc031006",  # Beacon1006 (airport)
+            ]
+
             for mac in known_macs:
                 if mac in data_hex:
                     # Found a beacon MAC!
@@ -431,8 +480,12 @@ class Codec8Parser:
             data_hex = data.hex().lower()
             
             # Search for known beacon MAC patterns
-            known_macs = ["7cd9f407f95c", "7cd9f407a2db", "7cd9f4003536", "7cd9f4116ee7", "7cd9f406427b"]
-            
+            known_macs = [
+                "7cd9f407f95c", "7cd9f407a2db", "7cd9f4003536",
+                "7cd9f4116ee7", "7cd9f406427b", "7cd9f4106a58",  # EyeSen6A58
+                "8670fc031006",  # Beacon1006 (airport)
+            ]
+
             for mac in known_macs:
                 if mac in data_hex:
                     logger.info(f"[FMC003] Found beacon MAC in element 11317: {mac}")
@@ -520,6 +573,31 @@ class Codec8Parser:
 # ============================================================
 # IMPROVED POSITIONING LOGIC
 # ============================================================
+def get_best_rssi_tracker(mac: str) -> tuple:
+    """
+    Return (imei, rssi) of the tracker with the strongest RSSI signal for this beacon.
+    Strongest RSSI = least negative value (e.g. -35 dBm is better than -55 dBm = physically closer).
+    Only considers readings from the last 2 minutes (stale readings ignored).
+    Returns (None, None) if no recent data exists.
+    Used to select the most accurate tracker when multiple trackers see the same beacon.
+    """
+    candidates = ble_rssi_map.get(mac, {})
+    if not candidates:
+        return None, None
+
+    now = datetime.now()
+    fresh = {
+        imei: data for imei, data in candidates.items()
+        if (now - data["last_seen"]).total_seconds() < 120  # 2-minute freshness window
+    }
+    if not fresh:
+        return None, None
+
+    # Select tracker with least negative RSSI (strongest signal = closest)
+    best_imei = max(fresh, key=lambda i: fresh[i].get("rssi") or -100)
+    return best_imei, fresh[best_imei].get("rssi")
+
+
 def calculate_distance_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """Calculate distance between two points in meters using Haversine formula"""
     import math
@@ -578,14 +656,68 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
             
             mac = matched_mac  # Use the full known MAC
             known_detected.append(mac)
-            
+
             # Get BLE definition info
             ble_info = ble_definitions.get(mac, {})
             beacon_name = ble_info.get("name", mac[:8])
+            tracker_label = trackers.get(imei, {}).get("label", imei)
             beacon["name"] = beacon_name
             beacon["category"] = ble_info.get("category", "Unknown")
             beacon["type"] = ble_info.get("type", "eye_beacon")
             beacon["sn"] = ble_info.get("sn", "")
+
+            # ============================================================
+            # HEARTBEAT: Always update last_seen + battery in SQL on every
+            # detection regardless of position change.
+            # Pairing key = mac + imei (unique combination).
+            # This ensures no beacon is ever "lost" from the database.
+            # ============================================================
+
+            # Update RSSI map for this tracker (enables multi-tracker proximity comparison)
+            if mac not in ble_rssi_map:
+                ble_rssi_map[mac] = {}
+            ble_rssi_map[mac][imei] = {
+                "rssi": beacon.get("rssi"),
+                "lat": tracker_lat,
+                "lng": tracker_lng,
+                "last_seen": now,
+            }
+            best_imei, best_rssi = get_best_rssi_tracker(mac)
+            is_best_tracker = (best_imei == imei or best_imei is None)
+            if not is_best_tracker:
+                logger.debug(
+                    f"BLE {mac}: tracker {imei} RSSI={beacon.get('rssi')} dBm, "
+                    f"best is {best_imei} RSSI={best_rssi} dBm"
+                )
+
+            if DB_ENABLED:
+                try:
+                    db_helper.update_ble_heartbeat(
+                        mac=mac,
+                        battery_percent=beacon.get("battery"),
+                        tracker_id=imei,
+                        tracker_label=tracker_label,
+                    )
+                except Exception as e:
+                    logger.debug(f"[DB] Heartbeat error: {e}")
+
+            # ALWAYS log to BLE_Scans for full history (mac + imei = unique pairing key)
+            if DB_ENABLED:
+                try:
+                    conn = db_helper.get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT INTO BLE_Scans
+                        (mac, lat, lng, tracker_imei, tracker_label, rssi, battery_percent,
+                         distance_meters, magnet_status, is_known_beacon, scan_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, GETDATE())
+                    """, mac, tracker_lat, tracker_lng, imei, tracker_label,
+                        beacon.get("rssi"), beacon.get("battery"),
+                        beacon.get("distance", 0),
+                        str(beacon.get("magnet_status")) if beacon.get("magnet_status") else None)
+                    conn.commit()
+                except Exception as e:
+                    logger.debug(f"[DB] BLE_Scans log error: {e}")
             
             # ============================================================
             # CASE 1: FIRST DETECTION - Set initial position (ONLY IF STOPPED)
@@ -695,7 +827,21 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
             # ============================================================
             if distance_m < GPS_DRIFT_THRESHOLD_M:
                 # Small movement = GPS drift, ignore position change
+                # But still save battery/metadata to DB so SQL stays current
                 logger.debug(f"BLE {mac}: Ignoring {distance_m:.1f}m movement (GPS drift < {GPS_DRIFT_THRESHOLD_M}m)")
+                if DB_ENABLED and beacon.get("battery") is not None:
+                    try:
+                        db_helper.update_ble_position(
+                            mac=mac,
+                            lat=old_lat, lng=old_lng,
+                            tracker_id=imei, tracker_label=imei,
+                            is_paired=ble_positions[mac].get("is_paired", False),
+                            pairing_duration_sec=ble_positions[mac].get("pairing_duration", 0),
+                            battery_percent=beacon.get("battery"),
+                            magnet_status=str(beacon.get("magnet_status")) if beacon.get("magnet_status") else None,
+                        )
+                    except Exception as e:
+                        logger.debug(f"[DB] Drift battery save error: {e}")
                 continue
             
             # ============================================================
@@ -729,13 +875,37 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
             # CASE 4: CONTINUOUS PAIRING (60s) - Towing detection
             # ============================================================
             current_pairing = ble_pairing.get(mac)
-            
-            if current_pairing is None or current_pairing.get("tracker_imei") != imei:
-                # New tracker - start pairing timer
+
+            if current_pairing is None:
+                # No pairing yet — start with this tracker
                 ble_pairing[mac] = {"tracker_imei": imei, "start_time": now}
-                logger.info(f"BLE {mac} ({beacon_name}): New tracker {imei}, starting 60s pairing timer")
+                logger.info(f"BLE {mac} ({beacon_name}): First pairing with {imei} (RSSI {beacon.get('rssi')} dBm)")
                 ble_positions[mac]["is_paired"] = False
                 ble_positions[mac]["pairing_duration"] = 0
+                continue
+
+            elif current_pairing.get("tracker_imei") != imei:
+                # Different tracker detected this beacon — compare RSSI to decide who wins
+                current_imei = current_pairing.get("tracker_imei")
+                current_rssi = ble_rssi_map.get(mac, {}).get(current_imei, {}).get("rssi") or -100
+                this_rssi    = beacon.get("rssi") or -100
+
+                if this_rssi > current_rssi + 5:
+                    # This tracker is at least 5 dBm stronger = physically closer = more accurate
+                    logger.info(
+                        f"BLE {mac} ({beacon_name}): RSSI switch "
+                        f"{current_imei}({current_rssi} dBm) -> {imei}({this_rssi} dBm) "
+                        f"(+{this_rssi - current_rssi} dBm improvement) — resetting 60s timer"
+                    )
+                    ble_pairing[mac] = {"tracker_imei": imei, "start_time": now}
+                    ble_positions[mac]["is_paired"] = False
+                    ble_positions[mac]["pairing_duration"] = 0
+                else:
+                    # Current tracker still has better or equal RSSI — keep existing pairing
+                    logger.debug(
+                        f"BLE {mac}: Keeping pairing with {current_imei} (RSSI {current_rssi} dBm) "
+                        f"over {imei} (RSSI {this_rssi} dBm) — signal not strong enough to switch"
+                    )
                 continue
             
             # Same tracker - check pairing duration
@@ -782,24 +952,8 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
             beacon["pairing_duration"] = int(pairing_duration)
             beacon["last_tracker"] = pos.get("tracker_label", imei)
             
-            # Log EVERY scan to BLE_Scans for historical analysis
-            if DB_ENABLED:
-                try:
-                    conn = db_helper.get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        INSERT INTO BLE_Scans 
-                        (mac, lat, lng, tracker_imei, tracker_label, rssi, battery_percent, 
-                         distance_meters, magnet_status, is_known_beacon, scan_time)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, GETDATE())
-                    """, mac, tracker_lat, tracker_lng, imei, imei, 
-                        beacon.get("rssi"), beacon.get("battery"), 
-                        beacon.get("distance", 0),
-                        str(beacon.get("magnet_status")) if beacon.get("magnet_status") else None)
-                    conn.commit()
-                    logger.debug(f"[DB] Scan logged: {mac}")
-                except Exception as e:
-                    logger.debug(f"[DB] Scan log error: {e}")
+            # BLE_Scans logging is now done at the top of the beacon loop (heartbeat section)
+            # so every detection is always recorded regardless of which case applies.
 
 
 # ============================================================
@@ -878,6 +1032,35 @@ def handle_client(client_socket: socket.socket, address: tuple):
                             trackers[imei]["last_update"] = record.get("timestamp")
                             trackers[imei]["beacons"] = beacons
                         
+                        # ── Battery enrichment ──────────────────────────────
+                        # IO element 548 = Eye Beacon battery (Teltonika sends mV
+                        # as a uint16, e.g. 2830 for 2.83 V). Apply to any beacon
+                        # in this record that has no battery yet, then convert all
+                        # battery values to percent so the map always shows a %.
+                        io_elements = record.get("io_elements", {})
+                        eye_bat_raw = io_elements.get(548)
+                        # element 548 stored as int when it came through fixed-size
+                        # IO section; stored as hex str when variable-length
+                        if isinstance(eye_bat_raw, str):
+                            try:
+                                eye_bat_raw = int(eye_bat_raw, 16)
+                            except ValueError:
+                                eye_bat_raw = None
+                        if eye_bat_raw is not None:
+                            eye_bat_pct = ble_battery_to_percent(eye_bat_raw)
+                            for b in beacons:
+                                if b.get("battery") is None and eye_bat_pct is not None:
+                                    b["battery"] = eye_bat_pct
+                                    logger.info(
+                                        f"[BATTERY] IO548={eye_bat_raw} → {eye_bat_pct}% "
+                                        f"applied to beacon {b.get('mac')}"
+                                    )
+                        # Convert any battery that came directly from element 385
+                        # (could be percent 0-100 or voltage in mV – handled by util)
+                        for b in beacons:
+                            if b.get("battery") is not None:
+                                b["battery"] = ble_battery_to_percent(b["battery"])
+
                         # Process BLE beacons with 60-sec pairing logic
                         if beacons:
                             logger.info(f"[TCP] {imei}: {len(beacons)} beacons at ({lat:.6f}, {lng:.6f}), Speed: {speed} km/h")
@@ -1274,14 +1457,25 @@ def main():
             db_positions = db_helper.get_all_ble_positions()
             for mac, pos in db_positions.items():
                 if mac not in ble_positions:
+                    _lu = pos.get("last_update")
+                    _last_seen = None
+                    if _lu:
+                        try:
+                            _last_seen = datetime.fromisoformat(_lu)
+                        except Exception:
+                            pass
                     ble_positions[mac] = {
                         "lat": pos.get("lat"),
                         "lng": pos.get("lng"),
                         "tracker_imei": str(pos.get("last_tracker_id", "")),
                         "tracker_label": pos.get("last_tracker_label", ""),
-                        "last_update": pos.get("last_update"),
+                        "last_update": _lu,
+                        "last_seen": _last_seen,
                         "is_paired": pos.get("is_paired", False),
+                        "pairing_duration": pos.get("pairing_duration_sec", 0),
                         "battery": pos.get("battery_percent"),
+                        "rssi": None,
+                        "magnet_status": None,
                     }
             logger.info(f"[DB] Loaded {len(db_positions)} stored BLE positions")
         except Exception as e:

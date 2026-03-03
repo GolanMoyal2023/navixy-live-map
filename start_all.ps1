@@ -14,8 +14,10 @@ param(
     [switch]$Restart   # Kill existing processes on 8767/8768 before starting
 )
 
-$Root      = "D:\New_Recovery\2Plus\navixy-live-map"
-$Python    = "$Root\.venv\Scripts\python.exe"
+$Root      = "D:\New_Recovery\2Plus\navixy-live-map-main-live"
+# Use the venv from the sibling folder (main-live has no .venv, packages are installed there)
+$VenvRoot  = "D:\New_Recovery\2Plus\navixy-live-map"
+$Python    = "$VenvRoot\.venv\Scripts\python.exe"
 $ApiHash   = "f038d4c96bfc683cdc52337824f7e5f0"
 
 # -------------------------------------------------------
