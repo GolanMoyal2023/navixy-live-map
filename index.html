@@ -980,12 +980,14 @@
         const droppedAtText = formatLastSaw(beacon.droppedAt);
         const dropActions = !CAN_ADMIN_CONTROLS ? "" : (beacon.isDropped
           ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+               <button type="button" onclick="window.dropBeaconAtMyLocation('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#16a34a;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">📍 My Location</button>
                <button type="button" onclick="window.markBeaconDropped('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#2563eb;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Update Drop Here</button>
                <button type="button" onclick="window.beginBeaconDropPick('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
                <button type="button" onclick="window.cancelBeaconDropPick()" style="border:0;background:#334155;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Cancel Pick</button>
                <button type="button" onclick="window.releaseBeaconDrop('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#059669;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Re-attach</button>
              </div>`
           : `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+               <button type="button" onclick="window.dropBeaconAtMyLocation('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#16a34a;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">📍 My Location</button>
                <button type="button" onclick="window.markBeaconDropped('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#dc2626;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Drop Here (Pin)</button>
                <button type="button" onclick="window.beginBeaconDropPick('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
                <button type="button" onclick="window.cancelBeaconDropPick()" style="border:0;background:#334155;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Cancel Pick</button>
@@ -1151,6 +1153,65 @@
         if (pendingDropBeaconMac === lower) pendingDropBeaconMac = null;
         setDropPickUi("");
         await loadData();
+      };
+
+      // ── 📍 Drop beacon at phone's current GPS location ───────────────────────
+      // Uses browser Geolocation API (phone GPS ~5m accuracy).
+      // Saves to DB via POST /ble/position so ALL devices see the correct location.
+      window.dropBeaconAtMyLocation = async function dropBeaconAtMyLocation(mac) {
+        if (!CAN_ADMIN_CONTROLS) return;
+        const lower = String(mac || "").toLowerCase();
+        if (!navigator.geolocation) {
+          alert("Geolocation is not supported by this browser.");
+          return;
+        }
+        const btn = document.activeElement;
+        if (btn) btn.textContent = "⏳ Getting GPS...";
+        navigator.geolocation.getCurrentPosition(
+          async function(position) {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const acc = Math.round(position.coords.accuracy);
+            const confirmed = confirm(
+              `Drop "${lower}" at:\n${lat.toFixed(6)}, ${lng.toFixed(6)}\nAccuracy: ±${acc}m\n\nConfirm?`
+            );
+            if (!confirmed) { if (btn) btn.textContent = "📍 My Location"; return; }
+            try {
+              // Save to DB (persists across devices and browser clears)
+              const apiBase = (window._apiBase || "").replace(/\/data$/, "");
+              const resp = await fetch(`${apiBase}/ble/position`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  mac: lower,
+                  lat: lat,
+                  lng: lng,
+                  tracker_id: 0,
+                  tracker_label: "Manual-Phone-GPS",
+                  is_paired: false,
+                  pairing_duration_sec: 0,
+                  contact_type: "Dropped Here",
+                }),
+              });
+              const result = await resp.json();
+              if (result.success) {
+                // Also update local pin so map refreshes immediately
+                setDropFromCoordinates(lower, lat, lng);
+                alert(`✅ Saved to DB!\n${lat.toFixed(6)}, ${lng.toFixed(6)} ±${acc}m`);
+                await loadData();
+              } else {
+                alert(`❌ Server error: ${result.error || "unknown"}`);
+              }
+            } catch(err) {
+              alert(`❌ Failed to save: ${err.message}`);
+            }
+          },
+          function(err) {
+            alert(`❌ GPS error: ${err.message}\nMake sure location is enabled.`);
+            if (btn) btn.textContent = "📍 My Location";
+          },
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        );
       };
 
       window.beginBeaconDropPick = function beginBeaconDropPick(mac) {
@@ -2872,6 +2933,7 @@
           if (j && j.dataUrl) {
             window.__NAVIXY_DATA_SOURCES.motorized_gse = j.dataUrl;
             window.__NAVIXY_DATA_SOURCES.direct = j.dataUrl;
+            window._apiBase = j.dataUrl; // used by dropBeaconAtMyLocation
           }
           startDataPolling();
         }).catch(function(){ startDataPolling(); });

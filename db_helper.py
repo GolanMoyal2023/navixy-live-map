@@ -152,7 +152,7 @@ def get_all_ble_positions() -> Dict[str, Dict[str, Any]]:
             SELECT mac, lat, lng, last_tracker_id, last_tracker_label,
                    last_update, is_paired, pairing_start, pairing_duration_sec,
                    battery_percent, magnet_status, name, category, ble_type, serial_number,
-                   rssi, contact_type, last_seen
+                   rssi, contact_type, last_seen, temperature, humidity, battery_voltage
             FROM BLE_Positions
         """)
 
@@ -181,6 +181,9 @@ def get_all_ble_positions() -> Dict[str, Dict[str, Any]]:
                 # last_seen = Navixy beacon timestamp (when tracker actually saw it)
                 # falls back to last_update (DB write time) if not yet populated
                 "last_seen":         row[17].isoformat() if row[17] else (row[5].isoformat() if row[5] else None),
+                "temperature":       float(row[18]) if row[18] is not None else None,
+                "humidity":          float(row[19]) if row[19] is not None else None,
+                "battery_voltage":   float(row[20]) if row[20] is not None else None,
             }
         return positions
     except Exception as e:
@@ -282,13 +285,16 @@ def update_ble_position(
 def update_ble_heartbeat(
     mac: str,
     battery_percent=None,
+    battery_voltage: float = None,
+    temperature: float = None,
+    humidity: float = None,
     tracker_id=None,
     tracker_label: str = None,
     rssi: float = None,
     last_seen_navixy: str = None,
 ) -> bool:
     """
-    Lightweight heartbeat update: refresh last_update, battery, rssi, last_seen on every detection.
+    Lightweight heartbeat update: refresh last_update, battery, rssi, temp, humidity on every detection.
     Does NOT change lat/lng position - only updates metadata.
     Called on every beacon scan so popup always shows fresh 'Last seen at'.
     """
@@ -308,12 +314,16 @@ def update_ble_heartbeat(
             UPDATE BLE_Positions
             SET last_update        = GETDATE(),
                 battery_percent    = COALESCE(?, battery_percent),
+                battery_voltage    = COALESCE(?, battery_voltage),
+                temperature        = COALESCE(?, temperature),
+                humidity           = COALESCE(?, humidity),
                 last_tracker_id    = COALESCE(?, last_tracker_id),
                 last_tracker_label = COALESCE(?, last_tracker_label),
                 rssi               = COALESCE(?, rssi),
                 last_seen          = COALESCE(?, last_seen)
             WHERE mac = ?
-        """, battery_percent, str(tracker_id) if tracker_id else None, tracker_label,
+        """, battery_percent, battery_voltage, temperature, humidity,
+            str(tracker_id) if tracker_id else None, tracker_label,
             rssi, last_seen_dt, mac)
         conn.commit()
         return cursor.rowcount > 0
@@ -364,34 +374,141 @@ def update_tracker(
     speed: float = None,
     device_type: str = None,
     category: str = None,
-    battery_percent: int = None
+    battery_percent: int = None,
+    imei: str = None,
+    connection_status: str = None,
+    movement_status: str = None,
+    ignition = None,
+    gps_signal: int = None,
+    gsm_signal: int = None,
+    engine_hours: float = None,
+    odometer: float = None,
 ) -> bool:
-    """Update or insert tracker position"""
+    """Update or insert tracker position and full state"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        
+
         cursor.execute("SELECT id FROM Trackers WHERE id = ?", tracker_id)
         exists = cursor.fetchone()
-        
+
         if exists:
             cursor.execute("""
                 UPDATE Trackers
                 SET label = ?, lat = ?, lng = ?, speed = ?, last_update = GETDATE(),
-                    battery_percent = ?
+                    battery_percent = ?,
+                    imei              = COALESCE(?, imei),
+                    connection_status = COALESCE(?, connection_status),
+                    movement_status   = COALESCE(?, movement_status),
+                    ignition          = COALESCE(?, ignition),
+                    gps_signal        = COALESCE(?, gps_signal),
+                    gsm_signal        = COALESCE(?, gsm_signal),
+                    engine_hours      = COALESCE(?, engine_hours),
+                    odometer          = COALESCE(?, odometer)
                 WHERE id = ?
-            """, label, lat, lng, speed, battery_percent, tracker_id)
+            """, label, lat, lng, speed, battery_percent,
+                imei, connection_status, movement_status,
+                ignition, gps_signal, gsm_signal, engine_hours, odometer,
+                tracker_id)
         else:
             cursor.execute("""
-                INSERT INTO Trackers 
-                (id, label, lat, lng, speed, device_type, category, battery_percent)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, tracker_id, label, lat, lng, speed, device_type, category, battery_percent)
-        
+                INSERT INTO Trackers
+                (id, label, lat, lng, speed, device_type, category, battery_percent,
+                 imei, connection_status, movement_status, ignition,
+                 gps_signal, gsm_signal, engine_hours, odometer)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, tracker_id, label, lat, lng, speed, device_type, category, battery_percent,
+                imei, connection_status, movement_status, ignition,
+                gps_signal, gsm_signal, engine_hours, odometer)
+
         conn.commit()
         return True
     except Exception as e:
         print(f"[DB ERROR] update_tracker: {e}")
+        return False
+
+
+def log_tracker_state(
+    tracker_id: int,
+    label: str,
+    imei: str = None,
+    lat: float = None,
+    lng: float = None,
+    speed: float = None,
+    connection_status: str = None,
+    movement_status: str = None,
+    ignition = None,
+    battery_level: int = None,
+    gps_signal: int = None,
+    gsm_signal: int = None,
+    engine_hours: float = None,
+    odometer: float = None,
+) -> bool:
+    """
+    Insert one time-series row into Tracker_State_Log.
+    Called on every /data poll so we build a full history of tracker state.
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO Tracker_State_Log
+            (tracker_id, label, imei, lat, lng, speed,
+             connection_status, movement_status, ignition,
+             battery_level, gps_signal, gsm_signal, engine_hours, odometer)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, tracker_id, label, imei, lat, lng, speed,
+            connection_status, movement_status, ignition,
+            battery_level, gps_signal, gsm_signal, engine_hours, odometer)
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"[DB ERROR] log_tracker_state: {e}")
+        return False
+
+
+def log_ble_detection(
+    mac: str,
+    lat: float,
+    lng: float,
+    tracker_id: int = None,
+    tracker_imei: str = None,
+    tracker_label: str = None,
+    rssi: float = None,
+    battery_percent = None,
+    battery_voltage: float = None,
+    temperature: float = None,
+    humidity: float = None,
+    is_known_beacon: bool = False,
+    contact_type: str = None,
+    pairing_duration_sec: int = None,
+) -> bool:
+    """
+    Insert one time-series row into BLE_Scans for every Navixy beacon detection.
+    Records full history: who saw which beacon, when, where, signal, battery, temp, humidity.
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        battery_int = None
+        if battery_percent is not None:
+            try:
+                battery_int = int(float(battery_percent))
+            except (TypeError, ValueError):
+                pass
+        cursor.execute("""
+            INSERT INTO BLE_Scans
+            (mac, lat, lng, tracker_imei, tracker_label, tracker_id,
+             rssi, battery_percent, battery_voltage, temperature, humidity,
+             is_known_beacon, contact_type, pairing_duration_sec, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'navixy')
+        """, mac.lower(), lat, lng, tracker_imei, tracker_label, tracker_id,
+            rssi, battery_int, battery_voltage, temperature, humidity,
+            int(bool(is_known_beacon)), contact_type, pairing_duration_sec)
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"[DB ERROR] log_ble_detection: {e}")
         return False
 
 

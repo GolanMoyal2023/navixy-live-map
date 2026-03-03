@@ -48,6 +48,14 @@ PAIRING_CONFIRM_SEC = 60    # need 60 s continuous detection to trust position
 DROP_CONFIRM_SEC    = 10    # tracker stopped 10 s → beacon dropped here
 DB_WRITE_INTERVAL   = 120   # throttle DB writes to at most once every 2 min
 
+# ── BLE MAC blacklist ─────────────────────────────────────────────────────────
+# MACs to silently ignore — e.g. FMC devices that sense their own BLE chip.
+# cb1817761006: LY_GSE_5032 FMC sensing its own BLE advertisement (random MAC).
+# Add more here if new self-detected / junk MACs appear.
+BLE_MAC_BLACKLIST = {
+    "cb1817761006",
+}
+
 app = Flask(__name__)
 
 
@@ -57,6 +65,16 @@ def add_cors_headers(response):  # type: ignore[override]
     response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, ngrok-skip-browser-warning, bypass-tunnel-reminder"
     return response
+
+
+def _parse_float(val: Any) -> Optional[float]:
+    """Parse a float from strings like '1234.56 h' or '5678 km' or plain numbers."""
+    if val is None:
+        return None
+    try:
+        return float(str(val).split()[0])
+    except (ValueError, IndexError, AttributeError):
+        return None
 
 
 def _api_call(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -230,13 +248,15 @@ def _extract_beacons(state: Dict[str, Any], readings: Dict[str, Any]) -> List[Di
                 battery = vs.get("value")
                 break
 
-        # Fallback: voltage from additional fields (Eye Beacons report raw voltage 2.0–3.0V)
+        # Fallback: raw voltage from additional fields (Eye Beacons 2.0–3.0V)
+        battery_voltage = None
         if battery is None:
             for vol_key in ("ble_beacon_voltage", "ble_voltage"):
                 val = additional.get(vol_key, {})
                 if isinstance(val, dict) and val.get("value") is not None:
                     try:
-                        battery = float(val["value"])
+                        battery_voltage = float(val["value"])
+                        battery = battery_voltage  # use as battery proxy
                     except (TypeError, ValueError):
                         pass
                     break
@@ -252,6 +272,46 @@ def _extract_beacons(state: Dict[str, Any], readings: Dict[str, Any]) -> List[Di
                     pass
                 break
 
+        # Extract temperature (°C) — available when beacon uses Sensors packet format
+        temperature = None
+        for temp_key in ("ble_beacon_temperature", "ble_temperature", "ble_temp"):
+            val = additional.get(temp_key, {})
+            if isinstance(val, dict) and val.get("value") is not None:
+                try:
+                    temperature = float(val["value"])
+                except (TypeError, ValueError):
+                    pass
+                break
+        if temperature is None:
+            for vs in readings.get("virtual_sensors", []) or []:
+                lbl = (vs.get("label") or vs.get("name", "")).lower()
+                if "temp" in lbl and "ble" in lbl:
+                    try:
+                        temperature = float(vs["value"])
+                    except (TypeError, ValueError):
+                        pass
+                    break
+
+        # Extract humidity (%) — available when beacon uses Sensors packet format
+        humidity = None
+        for hum_key in ("ble_beacon_humidity", "ble_humidity"):
+            val = additional.get(hum_key, {})
+            if isinstance(val, dict) and val.get("value") is not None:
+                try:
+                    humidity = float(val["value"])
+                except (TypeError, ValueError):
+                    pass
+                break
+        if humidity is None:
+            for vs in readings.get("virtual_sensors", []) or []:
+                lbl = (vs.get("label") or vs.get("name", "")).lower()
+                if "humid" in lbl and "ble" in lbl:
+                    try:
+                        humidity = float(vs["value"])
+                    except (TypeError, ValueError):
+                        pass
+                    break
+
         # Get magnet sensor states
         magnet_sensors = {}
         for i in range(1, 5):
@@ -260,11 +320,14 @@ def _extract_beacons(state: Dict[str, Any], readings: Dict[str, Any]) -> List[Di
                 magnet_sensors[f"magnet_{i}"] = additional[key].get("value")
 
         beacon = {
-            "mac":           beacon_mac,
-            "battery":       battery,
-            "rssi":          rssi,
-            "magnet_sensors": magnet_sensors,
-            "last_seen":     last_seen,
+            "mac":             beacon_mac,
+            "battery":         battery,
+            "battery_voltage": battery_voltage,
+            "temperature":     temperature,
+            "humidity":        humidity,
+            "rssi":            rssi,
+            "magnet_sensors":  magnet_sensors,
+            "last_seen":       last_seen,
         }
         beacons.append(beacon)
 
@@ -390,14 +453,15 @@ def _track_beacon_position(
     if entry is None or entry.get("tracker_id") != tracker_id:
         # New pairing (or tracker changed) – start the 60-second clock
         _navixy_pairing[mac] = {
-            "tracker_id":    tracker_id,
-            "tracker_label": tracker_lbl,
-            "first_seen":    now,
-            "last_seen":     now,
-            "lat":           tracker_lat,
-            "lng":           tracker_lng,
-            "confirmed":     False,
-            "last_db_write": None,
+            "tracker_id":       tracker_id,
+            "tracker_label":    tracker_lbl,
+            "first_seen":       now,
+            "last_seen":        now,
+            "lat":              tracker_lat,
+            "lng":              tracker_lng,
+            "confirmed":        False,
+            "last_db_write":    None,
+            "last_contact_type": None,   # track transitions to force drop writes
         }
         print(f"[BLE-PAIR] {mac} ({beacon_name}) - new pairing started with {tracker_lbl}")
         return  # wait for next poll to accumulate duration
@@ -418,6 +482,15 @@ def _track_beacon_position(
         contact_type = "Dropped Here"
     else:
         contact_type = "Pass Nearby"
+
+    # ── Force immediate DB write when car transitions moving → stopped ──────────
+    # Without this: a "Towing" write at T=60s sets last_db_write, so a 60-second
+    # stop would NOT trigger a "Dropped Here" write (throttled for 120s).
+    # Solution: reset the throttle whenever contact_type changes to "Dropped Here".
+    prev_contact_type = entry.get("last_contact_type")
+    if contact_type == "Dropped Here" and prev_contact_type != "Dropped Here":
+        entry["last_db_write"] = None
+        print(f"[BLE-PAIR] {mac} ({beacon_name}) - stopped → forcing Dropped Here write")
 
     # Decide whether to commit position to DB
     should_write = False
@@ -455,7 +528,8 @@ def _track_beacon_position(
             contact_type=contact_type,
             last_seen_navixy=last_seen_str,
         )
-        entry["last_db_write"] = now
+        entry["last_db_write"]    = now
+        entry["last_contact_type"] = contact_type
         print(
             f"[BLE-TRACK] {mac} ({beacon_name}) -> "
             f"({float(tracker_lat):.5f}, {float(tracker_lng):.5f}) "
@@ -549,6 +623,7 @@ def update_ble_position() -> Any:
             pairing_duration_sec=int(data.get("pairing_duration_sec", 0)),
             battery_percent=data.get("battery_percent"),
             magnet_status=data.get("magnet_status"),
+            contact_type=data.get("contact_type"),
             log_movement=True,
             old_lat=old_lat,
             old_lng=old_lng
@@ -595,9 +670,28 @@ def data() -> Any:
     now = datetime.now()
 
     # ── Prune stale pairing entries ──────────────────────────────────────────
+    # If a confirmed beacon disappears (signal lost), auto-write "Dropped Here"
+    # at the last known tracker position. This handles the case where the beacon
+    # goes out of BLE range before a stopped-position write could happen.
     for _mac in list(_navixy_pairing):
-        entry_age = (now - _navixy_pairing[_mac]["last_seen"]).total_seconds()
+        _entry = _navixy_pairing[_mac]
+        entry_age = (now - _entry["last_seen"]).total_seconds()
         if entry_age > FRESHNESS_SEC:
+            if _entry.get("confirmed") and _entry.get("lat") and _entry.get("lng") and DB_ENABLED:
+                try:
+                    db_helper.update_ble_position(
+                        mac=_mac,
+                        lat=float(_entry["lat"]),
+                        lng=float(_entry["lng"]),
+                        tracker_id=_entry["tracker_id"],
+                        tracker_label=_entry["tracker_label"],
+                        is_paired=False,
+                        contact_type="Dropped Here",
+                        last_seen_navixy=_entry["last_seen"].strftime("%Y-%m-%d %H:%M:%S"),
+                    )
+                    print(f"[BLE-AUTO-DROP] {_mac} -> ({float(_entry['lat']):.5f}, {float(_entry['lng']):.5f}) after {entry_age:.0f}s signal loss")
+                except Exception as _e:
+                    print(f"[BLE-AUTO-DROP] DB error for {_mac}: {_e}")
             print(f"[BLE-PAIR] {_mac} pairing expired (last seen {entry_age:.0f}s ago)")
             del _navixy_pairing[_mac]
 
@@ -613,8 +707,17 @@ def data() -> Any:
         readings = readings_resp if readings_resp.get("success") else {}
         row = _build_row(tracker, state_resp.get("state", {}), readings)
 
-        # Store tracker position in database
+        # Store tracker current state + time-series log
         if DB_ENABLED and row.get("lat") and row.get("lng"):
+            _t_imei     = row.get("imei")
+            _t_conn     = row.get("connection_status")
+            _t_move     = row.get("movement_status")
+            _t_ign      = row.get("ignition")
+            _t_bat      = row.get("battery_level")
+            _t_gps_sig  = row.get("gps_signal")
+            _t_gsm_sig  = row.get("gsm_signal")
+            _t_eng_h    = _parse_float(row.get("engine_hours"))
+            _t_odo      = _parse_float(row.get("odometer"))
             try:
                 db_helper.update_tracker(
                     tracker_id=tracker_id,
@@ -622,10 +725,37 @@ def data() -> Any:
                     lat=float(row["lat"]),
                     lng=float(row["lng"]),
                     speed=row.get("speed"),
-                    battery_percent=row.get("battery_level")
+                    battery_percent=_t_bat,
+                    imei=_t_imei,
+                    connection_status=_t_conn,
+                    movement_status=_t_move,
+                    ignition=_t_ign,
+                    gps_signal=_t_gps_sig,
+                    gsm_signal=_t_gsm_sig,
+                    engine_hours=_t_eng_h,
+                    odometer=_t_odo,
                 )
             except Exception as e:
                 print(f"[DB] Error saving tracker {tracker_id}: {e}")
+            try:
+                db_helper.log_tracker_state(
+                    tracker_id=tracker_id,
+                    label=row.get("label", ""),
+                    imei=_t_imei,
+                    lat=float(row["lat"]),
+                    lng=float(row["lng"]),
+                    speed=row.get("speed"),
+                    connection_status=_t_conn,
+                    movement_status=_t_move,
+                    ignition=_t_ign,
+                    battery_level=_t_bat,
+                    gps_signal=_t_gps_sig,
+                    gsm_signal=_t_gsm_sig,
+                    engine_hours=_t_eng_h,
+                    odometer=_t_odo,
+                )
+            except Exception as e:
+                print(f"[DB] Error logging tracker state {tracker_id}: {e}")
 
         # ── Enrich beacons + robust position tracking ─────────────────────
         tracker_lat = row.get("lat")
@@ -635,6 +765,11 @@ def data() -> Any:
 
         for beacon in row.get("beacons", []):
             mac = beacon.get("mac", "").lower()
+
+            # Skip blacklisted MACs (e.g. FMC sensing its own BLE chip)
+            if mac in BLE_MAC_BLACKLIST:
+                print(f"[BLE-SKIP] Blacklisted MAC {mac} ignored")
+                continue
 
             # Enrich beacon with known definition metadata
             if mac and mac in ble_defs:
@@ -648,10 +783,26 @@ def data() -> Any:
             # Heartbeat: refresh last_update, battery, RSSI, last_seen on every detection
             # (keeps popup "Last seen at" fresh even for non-paired beacons)
             if mac and DB_ENABLED:
+                # Determine live contact_type / pairing duration from in-memory state
+                _pairing_entry = _navixy_pairing.get(mac, {})
+                _live_contact_type = None
+                _live_pairing_dur  = None
+                if _pairing_entry:
+                    _pdur = (now - _pairing_entry.get("first_seen", now)).total_seconds()
+                    _live_pairing_dur = int(_pdur)
+                    if tracker_spd > 2 and _pdur >= PAIRING_CONFIRM_SEC:
+                        _live_contact_type = "Towing"
+                    elif tracker_spd <= 2 and _pdur >= DROP_CONFIRM_SEC:
+                        _live_contact_type = "Dropped Here"
+                    else:
+                        _live_contact_type = "Pass Nearby"
                 try:
                     db_helper.update_ble_heartbeat(
                         mac=mac,
                         battery_percent=beacon.get("battery"),
+                        battery_voltage=beacon.get("battery_voltage"),
+                        temperature=beacon.get("temperature"),
+                        humidity=beacon.get("humidity"),
                         rssi=beacon.get("rssi"),
                         last_seen_navixy=beacon.get("last_seen"),
                         tracker_id=tracker_id,
@@ -659,6 +810,27 @@ def data() -> Any:
                     )
                 except Exception:
                     pass
+                # Time-series: log every beacon detection to BLE_Scans
+                if tracker_lat and tracker_lng:
+                    try:
+                        db_helper.log_ble_detection(
+                            mac=mac,
+                            lat=float(tracker_lat),
+                            lng=float(tracker_lng),
+                            tracker_id=tracker_id,
+                            tracker_imei=row.get("imei"),
+                            tracker_label=tracker_lbl,
+                            rssi=beacon.get("rssi"),
+                            battery_percent=beacon.get("battery"),
+                            battery_voltage=beacon.get("battery_voltage"),
+                            temperature=beacon.get("temperature"),
+                            humidity=beacon.get("humidity"),
+                            is_known_beacon=(mac in ble_defs),
+                            contact_type=_live_contact_type,
+                            pairing_duration_sec=_live_pairing_dur,
+                        )
+                    except Exception:
+                        pass
 
             # Only track position for known beacons on a tracker with valid GPS
             if not (mac and mac in ble_defs and tracker_lat and tracker_lng):
