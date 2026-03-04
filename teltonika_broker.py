@@ -402,6 +402,17 @@ class Codec8Parser:
                         logger.info(f"[DEBUG] ELEMENT 385 FOUND! Length={length}")
                         beacons = Codec8Parser._parse_ble_beacons(value)
                         record["beacons"].extend(beacons)
+                        # Fallback: scan raw data for known Eye Beacon MACs.
+                        # Handles the proprietary Teltonika format (11 03/07 header + 11 zero bytes
+                        # + MAC at offset 13) which _parse_ble_beacons misses for short elements.
+                        extra = Codec8Parser._parse_fmc003_beacons(value, 385)
+                        existing_macs = {b.get("mac") for b in beacons}
+                        for b in extra:
+                            if b.get("mac") not in existing_macs:
+                                # Battery from pattern-scan is unreliable (reads zero-padding before MAC).
+                                # Set to None so COALESCE preserves the existing DB value.
+                                b["battery"] = None
+                                record["beacons"].append(b)
                     elif io_id in (10828, 10829):  # FMC003 custom EYE beacon elements
                         # Parse FMC003 custom beacon format
                         beacons = Codec8Parser._parse_fmc003_beacons(value, io_id)
