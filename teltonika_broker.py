@@ -865,6 +865,7 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                             is_paired=True, pairing_duration_sec=int(gap_seconds),
                             battery_percent=beacon.get("battery"),
                             magnet_status=str(beacon.get("magnet_status")) if beacon.get("magnet_status") else None,
+                            contact_type="Towing",
                         )
                         logger.info(f"[DB] Updated BLE position after gap: {mac}")
                     except Exception as e:
@@ -936,6 +937,7 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                             pairing_duration_sec=int(pairing_duration),
                             battery_percent=beacon.get("battery"),
                             magnet_status=str(beacon.get("magnet_status")) if beacon.get("magnet_status") else None,
+                            contact_type="Towing",
                         )
                         logger.info(f"[DB] Updated BLE position during towing: {mac}")
                     except Exception as e:
