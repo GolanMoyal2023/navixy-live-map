@@ -385,6 +385,21 @@ def update_beacon_battery(mac: str, battery_percent=None, magnet_status: str = N
         return False
 
 
+def get_beacon_contact_type(mac: str) -> str:
+    """Get the current contact_type for a beacon MAC. Returns None if not found."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT contact_type FROM BLE_Positions WHERE mac = ?", mac)
+        row = cursor.fetchone()
+        if row:
+            return str(row[0]) if row[0] else None
+        return None
+    except Exception as e:
+        print(f"[DB ERROR] get_beacon_contact_type({mac}): {e}")
+        return None
+
+
 def get_tracker_by_imei(imei: str) -> dict:
     """Look up a tracker row by IMEI. Returns dict with 'id' and 'label', or None if not found."""
     try:

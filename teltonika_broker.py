@@ -857,13 +857,24 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
             # ============================================================
             if gap_seconds > GAP_THRESHOLD_SEC and distance_m > SIGNIFICANT_MOVE_M:
                 # Beacon was not seen for >5 min and moved >50m = new placement
+                # But first: if beacon is marked "Dropped Here" in DB, vehicle just drove
+                # past it — do NOT change it to Towing. Update in-memory only so
+                # subsequent close-range detections fall into CASE 2 (battery only).
+                if DB_ENABLED:
+                    current_ct = db_helper.get_beacon_contact_type(mac)
+                    if current_ct == 'Dropped Here':
+                        logger.info(f"BLE {mac} ({beacon_name}): Dropped beacon detected nearby (GAP {gap_seconds:.0f}s, {distance_m:.0f}m) - vehicle drove past, keeping Dropped Here")
+                        ble_positions[mac]["lat"] = tracker_lat
+                        ble_positions[mac]["lng"] = tracker_lng
+                        continue
+
                 logger.info(f"BLE {mac} ({beacon_name}): GAP DETECTED ({gap_seconds:.0f}s) + MOVED {distance_m:.0f}m -> UPDATING POSITION")
-                
+
                 ble_positions[mac]["lat"] = tracker_lat
                 ble_positions[mac]["lng"] = tracker_lng
                 ble_positions[mac]["is_paired"] = True
                 ble_pairing[mac] = {"tracker_imei": imei, "start_time": now}
-                
+
                 # Save to database
                 if DB_ENABLED:
                     try:
