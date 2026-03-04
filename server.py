@@ -494,24 +494,21 @@ def _track_beacon_position(
     is_moving  = tracker_spd > 2
     is_stopped = tracker_spd <= 2
 
-    # Determine contact type label for popup display
+    # Determine contact type label for display / logging only.
+    # IMPORTANT: "Dropped Here" is NEVER written by this function.
+    # It is only written by the auto-drop prune loop (top of /data) once the
+    # beacon's signal has been LOST and the tracker has MOVED ≥ 200 m away.
+    # Writing "Dropped Here" here (while the beacon is actively scanned) was
+    # causing false drops every time the car stopped, even with the beacon inside.
     if is_moving and pairing_duration >= PAIRING_CONFIRM_SEC:
         contact_type = "Towing"
-    elif is_stopped and pairing_duration >= DROP_CONFIRM_SEC:
-        contact_type = "Dropped Here"
     else:
         contact_type = "Pass Nearby"
 
-    # ── Force immediate DB write when car transitions moving → stopped ──────────
-    # Without this: a "Towing" write at T=60s sets last_db_write, so a 60-second
-    # stop would NOT trigger a "Dropped Here" write (throttled for 120s).
-    # Solution: reset the throttle whenever contact_type changes to "Dropped Here".
-    prev_contact_type = entry.get("last_contact_type")
-    if contact_type == "Dropped Here" and prev_contact_type != "Dropped Here":
-        entry["last_db_write"] = None
-        print(f"[BLE-PAIR] {mac} ({beacon_name}) - stopped → forcing Dropped Here write")
-
-    # Decide whether to commit position to DB
+    # Decide whether to commit position to DB.
+    # Only write while the tracker is MOVING and confirmed (≥ PAIRING_CONFIRM_SEC).
+    # When stopped we do NOT write — the position from the last moving write is
+    # accurate, and the auto-drop prune handles the "Dropped Here" transition.
     should_write = False
     write_reason = ""
 
@@ -520,13 +517,6 @@ def _track_beacon_position(
         if last_write is None or (now - last_write).total_seconds() >= DB_WRITE_INTERVAL:
             should_write = True
             write_reason = f"MOVING {pairing_duration:.0f}s"
-            entry["confirmed"] = True
-
-    elif is_stopped and pairing_duration >= DROP_CONFIRM_SEC:
-        last_write = entry.get("last_db_write")
-        if last_write is None or (now - last_write).total_seconds() >= DB_WRITE_INTERVAL:
-            should_write = True
-            write_reason = f"DROPPED {pairing_duration:.0f}s"
             entry["confirmed"] = True
 
     if not should_write or not DB_ENABLED:
@@ -854,10 +844,11 @@ def data() -> Any:
                     _live_pairing_dur = int(_pdur)
                     if tracker_spd > 2 and _pdur >= PAIRING_CONFIRM_SEC:
                         _live_contact_type = "Towing"
-                    elif tracker_spd <= 2 and _pdur >= DROP_CONFIRM_SEC:
-                        _live_contact_type = "Dropped Here"
                     else:
                         _live_contact_type = "Pass Nearby"
+                    # NOTE: "Dropped Here" is intentionally never set here.
+                    # It is only written by the auto-drop prune loop when the
+                    # beacon signal is lost AND the tracker has moved ≥ 200 m.
                 try:
                     db_helper.update_ble_heartbeat(
                         mac=mac,
