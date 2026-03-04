@@ -5,6 +5,7 @@ Provides /data endpoint for the static map UI.
 Now with SQL Server integration for BLE position persistence.
 """
 
+import math
 import os
 import time
 from datetime import datetime, timezone, timedelta
@@ -55,6 +56,24 @@ DB_WRITE_INTERVAL   = 120   # throttle DB writes to at most once every 2 min
 BLE_MAC_BLACKLIST = {
     "cb1817761006",
 }
+
+# ── Auto-drop movement threshold ─────────────────────────────────────────────
+# Only auto-drop a beacon when the tracker has moved at least this many metres
+# away from where it last saw the beacon.  Prevents false drops when the FMC
+# keeps sending heartbeat pings while the car is parked (tracker appears
+# "active" but hasn't moved — beacon is still in the car, not truly dropped).
+AUTODROP_MOVE_M = 200   # metres the tracker must have moved before we commit a drop
+
+
+def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Return the great-circle distance in metres between two WGS-84 points."""
+    R = 6_371_000  # Earth radius in metres
+    φ1, φ2 = math.radians(lat1), math.radians(lat2)
+    dφ = math.radians(lat2 - lat1)
+    dλ = math.radians(lng2 - lng1)
+    a = math.sin(dφ / 2) ** 2 + math.cos(φ1) * math.cos(φ2) * math.sin(dλ / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
 
 app = Flask(__name__)
 
@@ -682,24 +701,45 @@ def data() -> Any:
         entry_age = (now - _entry["last_seen"]).total_seconds()
         if entry_age > FRESHNESS_SEC:
             if _entry.get("confirmed") and _entry.get("lat") and _entry.get("lng") and DB_ENABLED:
-                # Check if the paired tracker is still actively reporting GPS.
-                # If tracker last_update is also stale → car is parked, skip auto-drop.
-                _tracker_active = False
+                # Only auto-drop when the tracker has MOVED AWAY from the beacon.
+                # Strategy:
+                #   1. Tracker must be recently active (heartbeat seen).
+                #   2. Tracker must have moved >= AUTODROP_MOVE_M metres from the
+                #      spot where it last saw the beacon.  This prevents false drops
+                #      when the FMC sends heartbeat pings while parked — the car
+                #      hasn't moved, so the beacon is still in it, not dropped.
+                _should_drop = False
                 try:
                     _tc = db_helper.get_connection()
                     _tcur = _tc.cursor()
                     _tcur.execute(
-                        "SELECT last_update FROM Trackers WHERE id = ?",
+                        "SELECT last_update, lat, lng, movement_status FROM Trackers WHERE id = ?",
                         _entry["tracker_id"]
                     )
                     _trow = _tcur.fetchone()
                     if _trow and _trow[0]:
                         _tracker_age = (now - _trow[0]).total_seconds()
                         _tracker_active = _tracker_age < FRESHNESS_SEC
+                        if _tracker_active:
+                            _tr_lat  = float(_trow[1] or 0)
+                            _tr_lng  = float(_trow[2] or 0)
+                            _bcn_lat = float(_entry["lat"])
+                            _bcn_lng = float(_entry["lng"])
+                            if _tr_lat and _tr_lng and _bcn_lat and _bcn_lng:
+                                _moved_m = _haversine_m(_bcn_lat, _bcn_lng, _tr_lat, _tr_lng)
+                                if _moved_m >= AUTODROP_MOVE_M:
+                                    _should_drop = True
+                                    print(f"[BLE-AUTO-DROP] {_mac}: tracker moved {_moved_m:.0f}m away → DROP")
+                                else:
+                                    print(f"[BLE-AUTO-DROP] SKIP {_mac} ({_entry.get('tracker_label','?')}) - tracker only {_moved_m:.0f}m away (parked near beacon)")
+                            else:
+                                print(f"[BLE-AUTO-DROP] SKIP {_mac} - missing lat/lng for distance check")
+                        else:
+                            print(f"[BLE-AUTO-DROP] SKIP {_mac} ({_entry.get('tracker_label','?')}) - tracker also quiet (car off)")
                 except Exception as _te:
                     print(f"[BLE-AUTO-DROP] tracker-check error for {_mac}: {_te}")
 
-                if _tracker_active:
+                if _should_drop:
                     try:
                         db_helper.update_ble_position(
                             mac=_mac,
@@ -711,11 +751,9 @@ def data() -> Any:
                             contact_type="Dropped Here",
                             last_seen_navixy=_entry["last_seen"].strftime("%Y-%m-%d %H:%M:%S"),
                         )
-                        print(f"[BLE-AUTO-DROP] {_mac} -> ({float(_entry['lat']):.5f}, {float(_entry['lng']):.5f}) after {entry_age:.0f}s signal loss")
+                        print(f"[BLE-AUTO-DROP] {_mac} → ({float(_entry['lat']):.5f}, {float(_entry['lng']):.5f}) after {entry_age:.0f}s signal loss")
                     except Exception as _e:
                         print(f"[BLE-AUTO-DROP] DB error for {_mac}: {_e}")
-                else:
-                    print(f"[BLE-AUTO-DROP] SKIP {_mac} ({_entry.get('tracker_label','?')} also quiet) - car parked, not a drop")
             print(f"[BLE-PAIR] {_mac} pairing expired (last seen {entry_age:.0f}s ago)")
             del _navixy_pairing[_mac]
 
