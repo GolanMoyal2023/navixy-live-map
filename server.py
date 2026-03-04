@@ -673,25 +673,49 @@ def data() -> Any:
     # If a confirmed beacon disappears (signal lost), auto-write "Dropped Here"
     # at the last known tracker position. This handles the case where the beacon
     # goes out of BLE range before a stopped-position write could happen.
+    #
+    # IMPORTANT: Only auto-drop when the TRACKER is still active.
+    # If the tracker also went quiet (car parked/off for the night), do NOT write
+    # "Dropped Here" — the beacon is still in the parked car, not actually dropped.
     for _mac in list(_navixy_pairing):
         _entry = _navixy_pairing[_mac]
         entry_age = (now - _entry["last_seen"]).total_seconds()
         if entry_age > FRESHNESS_SEC:
             if _entry.get("confirmed") and _entry.get("lat") and _entry.get("lng") and DB_ENABLED:
+                # Check if the paired tracker is still actively reporting GPS.
+                # If tracker last_update is also stale → car is parked, skip auto-drop.
+                _tracker_active = False
                 try:
-                    db_helper.update_ble_position(
-                        mac=_mac,
-                        lat=float(_entry["lat"]),
-                        lng=float(_entry["lng"]),
-                        tracker_id=_entry["tracker_id"],
-                        tracker_label=_entry["tracker_label"],
-                        is_paired=False,
-                        contact_type="Dropped Here",
-                        last_seen_navixy=_entry["last_seen"].strftime("%Y-%m-%d %H:%M:%S"),
+                    _tc = db_helper.get_connection()
+                    _tcur = _tc.cursor()
+                    _tcur.execute(
+                        "SELECT last_update FROM Trackers WHERE id = ?",
+                        _entry["tracker_id"]
                     )
-                    print(f"[BLE-AUTO-DROP] {_mac} -> ({float(_entry['lat']):.5f}, {float(_entry['lng']):.5f}) after {entry_age:.0f}s signal loss")
-                except Exception as _e:
-                    print(f"[BLE-AUTO-DROP] DB error for {_mac}: {_e}")
+                    _trow = _tcur.fetchone()
+                    if _trow and _trow[0]:
+                        _tracker_age = (now - _trow[0]).total_seconds()
+                        _tracker_active = _tracker_age < FRESHNESS_SEC
+                except Exception as _te:
+                    print(f"[BLE-AUTO-DROP] tracker-check error for {_mac}: {_te}")
+
+                if _tracker_active:
+                    try:
+                        db_helper.update_ble_position(
+                            mac=_mac,
+                            lat=float(_entry["lat"]),
+                            lng=float(_entry["lng"]),
+                            tracker_id=_entry["tracker_id"],
+                            tracker_label=_entry["tracker_label"],
+                            is_paired=False,
+                            contact_type="Dropped Here",
+                            last_seen_navixy=_entry["last_seen"].strftime("%Y-%m-%d %H:%M:%S"),
+                        )
+                        print(f"[BLE-AUTO-DROP] {_mac} -> ({float(_entry['lat']):.5f}, {float(_entry['lng']):.5f}) after {entry_age:.0f}s signal loss")
+                    except Exception as _e:
+                        print(f"[BLE-AUTO-DROP] DB error for {_mac}: {_e}")
+                else:
+                    print(f"[BLE-AUTO-DROP] SKIP {_mac} ({_entry.get('tracker_label','?')} also quiet) - car parked, not a drop")
             print(f"[BLE-PAIR] {_mac} pairing expired (last seen {entry_age:.0f}s ago)")
             del _navixy_pairing[_mac]
 
