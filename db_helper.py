@@ -366,6 +366,21 @@ def log_pairing(
         return False
 
 
+def get_tracker_by_imei(imei: str) -> dict:
+    """Look up a tracker row by IMEI. Returns dict with 'id' and 'label', or None if not found."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, label FROM Trackers WHERE imei = ?", imei)
+        row = cursor.fetchone()
+        if row:
+            return {"id": int(row[0]), "label": str(row[1])}
+        return None
+    except Exception as e:
+        print(f"[DB ERROR] get_tracker_by_imei({imei}): {e}")
+        return None
+
+
 def update_tracker(
     tracker_id: int,
     label: str,

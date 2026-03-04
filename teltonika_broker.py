@@ -978,17 +978,23 @@ def handle_client(client_socket: socket.socket, address: tuple):
                 # Send acknowledgment (accept)
                 client_socket.send(b'\x01')
                 
-                # Initialize tracker
+                # Initialize tracker — look up real ID + label from DB by IMEI
                 with data_lock:
                     if imei not in trackers:
+                        db_info = db_helper.get_tracker_by_imei(imei)
                         trackers[imei] = {
-                            "label": imei,
+                            "label": db_info["label"] if db_info else imei,
+                            "db_id": db_info["id"] if db_info else None,
                             "lat": 0,
                             "lng": 0,
                             "speed": 0,
                             "last_update": None,
                             "beacons": [],
                         }
+                        if db_info:
+                            logger.info(f"[TCP] IMEI {imei} mapped to tracker '{db_info['label']}' (id={db_info['id']})")
+                        else:
+                            logger.warning(f"[TCP] IMEI {imei} not found in Trackers table — using IMEI as label")
             else:
                 logger.warning(f"[TCP] Invalid IMEI from {address}")
                 client_socket.send(b'\x00')
@@ -1068,12 +1074,15 @@ def handle_client(client_socket: socket.socket, address: tuple):
                             logger.info(f"[TCP] {imei}: {len(beacons)} beacons at ({lat:.6f}, {lng:.6f}), Speed: {speed} km/h")
                             process_beacons(imei, lat, lng, beacons, tracker_speed=speed)
                         
-                        # Save tracker to database
+                        # Save tracker to database using real Navixy tracker_id + label
                         if DB_ENABLED:
                             try:
+                                _t = trackers.get(imei, {})
+                                _real_id = _t.get("db_id") or hash(imei) % 100000
+                                _real_label = _t.get("label") or imei
                                 db_helper.update_tracker(
-                                    tracker_id=hash(imei) % 100000,
-                                    label=imei,
+                                    tracker_id=_real_id,
+                                    label=_real_label,
                                     lat=lat,
                                     lng=lng,
                                     speed=speed
