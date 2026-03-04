@@ -831,12 +831,9 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                 logger.debug(f"BLE {mac}: Ignoring {distance_m:.1f}m movement (GPS drift < {GPS_DRIFT_THRESHOLD_M}m)")
                 if DB_ENABLED and beacon.get("battery") is not None:
                     try:
-                        db_helper.update_ble_position(
+                        # Battery-only update — never overwrite is_paired or contact_type
+                        db_helper.update_beacon_battery(
                             mac=mac,
-                            lat=old_lat, lng=old_lng,
-                            tracker_id=imei, tracker_label=imei,
-                            is_paired=ble_positions[mac].get("is_paired", False),
-                            pairing_duration_sec=ble_positions[mac].get("pairing_duration", 0),
                             battery_percent=beacon.get("battery"),
                             magnet_status=str(beacon.get("magnet_status")) if beacon.get("magnet_status") else None,
                         )

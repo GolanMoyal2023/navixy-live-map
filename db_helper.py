@@ -366,6 +366,25 @@ def log_pairing(
         return False
 
 
+def update_beacon_battery(mac: str, battery_percent=None, magnet_status: str = None) -> bool:
+    """Update ONLY battery/magnet for a beacon — never touches is_paired, contact_type, or position."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE BLE_Positions
+            SET battery_percent = COALESCE(?, battery_percent),
+                magnet_status   = COALESCE(?, magnet_status),
+                last_update     = GETDATE()
+            WHERE mac = ?
+        """, battery_percent, magnet_status, mac.lower())
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"[DB ERROR] update_beacon_battery({mac}): {e}")
+        return False
+
+
 def get_tracker_by_imei(imei: str) -> dict:
     """Look up a tracker row by IMEI. Returns dict with 'id' and 'label', or None if not found."""
     try:
