@@ -736,14 +736,14 @@
         "7CD9F406427B": { name: "EyeBe3", sn: "", type: "eye_beacon", category: "Equipment" },
         "7CD9F407A2DB": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7CD9F4116EE7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
-        "7CD9F4106A58": { name: "EyeSen6A58", sn: "", type: "eye_sensor", category: "Safety" },
+        "7CD9F4106A58": { name: "Beacon 6A58", sn: "", type: "eye_beacon", category: "Uncategorized" },
         "720EAF059935": { name: "Beacon 9935", sn: "", type: "eye_beacon", category: "Uncategorized" },
         "7cd9f407f95c": { name: "Eybe2plus1", sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
         "7cd9f4003536": { name: "Eybe2plus2", sn: "6204011168", type: "eye_beacon", category: "Equipment" },
         "7cd9f406427b": { name: "EyeBe3", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f407a2db": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f4116ee7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
-        "7cd9f4106a58": { name: "EyeSen6A58", sn: "", type: "eye_sensor", category: "Safety" },
+        "7cd9f4106a58": { name: "Beacon 6A58", sn: "", type: "eye_beacon", category: "Uncategorized" },
         "720eaf059935": { name: "Beacon 9935", sn: "", type: "eye_beacon", category: "Uncategorized" },
       };
 
@@ -761,7 +761,6 @@
       const OUT_OF_SERVICE_BEACON_MACS = new Set([
         "7cd9f4003536", // broken, out of service
         "720eaf059935", // unknown/temporary - hide during stabilization phase
-        "ccf8bc4d1006", // simulation-only beacon, not a known permanent device
       ]);
       // Fixed business mapping requested by operations:
       // 4 beacons travel together with SKODA, one beacon stays with GSE 5032.
@@ -978,21 +977,18 @@
         const lastSawText = formatLastSaw(beacon.lastSeenAt || beacon.lastUpdate);
         const pairingSeconds = Math.max(0, Math.floor(Number(beacon.pairingDuration || 0)));
         const droppedAtText = formatLastSaw(beacon.droppedAt);
-        // "📍 My Location" is visible to ALL users (phone GPS, no admin needed).
-        // Other buttons (pick coords, re-attach) require admin access.
-        const _bmac = String(beacon.mac || "").toLowerCase();
-        const _adminOnlyBtns = !CAN_ADMIN_CONTROLS ? "" : (beacon.isDropped
-          ? `<button type="button" onclick="window.markBeaconDropped('${_bmac}')" style="border:0;background:#2563eb;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Update Drop Here</button>
-               <button type="button" onclick="window.beginBeaconDropPick('${_bmac}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
+        const dropActions = !CAN_ADMIN_CONTROLS ? "" : (beacon.isDropped
+          ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+               <button type="button" onclick="window.markBeaconDropped('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#2563eb;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Update Drop Here</button>
+               <button type="button" onclick="window.beginBeaconDropPick('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
                <button type="button" onclick="window.cancelBeaconDropPick()" style="border:0;background:#334155;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Cancel Pick</button>
-               <button type="button" onclick="window.releaseBeaconDrop('${_bmac}')" style="border:0;background:#059669;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Re-attach</button>`
-          : `<button type="button" onclick="window.markBeaconDropped('${_bmac}')" style="border:0;background:#dc2626;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Drop Here (Pin)</button>
-               <button type="button" onclick="window.beginBeaconDropPick('${_bmac}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
-               <button type="button" onclick="window.cancelBeaconDropPick()" style="border:0;background:#334155;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Cancel Pick</button>`);
-        const dropActions = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
-               <button type="button" onclick="window.dropBeaconAtMyLocation('${_bmac}')" style="border:0;background:#16a34a;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">📍 My Location</button>
-               ${_adminOnlyBtns}
-             </div>`;
+               <button type="button" onclick="window.releaseBeaconDrop('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#059669;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Re-attach</button>
+             </div>`
+          : `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+               <button type="button" onclick="window.markBeaconDropped('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#dc2626;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Drop Here (Pin)</button>
+               <button type="button" onclick="window.beginBeaconDropPick('${String(beacon.mac || "").toLowerCase()}')" style="border:0;background:#7c3aed;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Pick On Map</button>
+               <button type="button" onclick="window.cancelBeaconDropPick()" style="border:0;background:#334155;color:white;padding:4px 8px;border-radius:4px;cursor:pointer;">Cancel Pick</button>
+             </div>`);
         return `
           <div class="beacon-popup">
             <div class="beacon-header" style="background:${catConfig.color};color:white;padding:8px 12px;margin:-12px -12px 10px -12px;border-radius:4px 4px 0 0;display:flex;align-items:center;gap:8px;">
@@ -1047,8 +1043,8 @@
             </div>` : ""}
             <div class="beacon-host" style="background:#f3f4f6;padding:6px 8px;border-radius:4px;margin-top:8px;">
               <div style="font-weight:600;margin-bottom:4px;">📍 BLE Position Info</div>
-              <div>Last seen by: <strong>${beacon.lastSeenByTracker || beacon.hostTrackerLabel}</strong>${beacon.contactType ? ` <span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;color:white;background:${beacon.contactType==='Towing'?'#059669':beacon.contactType==='Dropped Here'?'#b91c1c':'#f59e0b'}">${beacon.contactType}</span>` : ""}</div>
-              ${lastSawText ? `<div>Last seen at: <strong>${lastSawText}</strong></div>` : ""}
+              <div>Last set by: <strong>${beacon.lastSeenByTracker || beacon.hostTrackerLabel}</strong></div>
+              ${lastSawText ? `<div>Last saw: <strong>${lastSawText}</strong></div>` : ""}
               <div>Last Location: <strong>${latStr}, ${lngStr}</strong></div>
               ${beacon.isDropped
                 ? `<div style="color:#b91c1c;font-weight:700;">📌 DROPPED IN FIELD</div>${droppedAtText ? `<div>Dropped at: <strong>${droppedAtText}</strong></div>` : ""}${beacon.droppedByTracker ? `<div>Dropped by: <strong>${beacon.droppedByTracker}</strong></div>` : ""}`
@@ -1130,6 +1126,111 @@
         }
       }
 
+      function replaceDroppedBeaconPins(nextPins) {
+        Object.keys(droppedBeaconPins).forEach((k) => delete droppedBeaconPins[k]);
+        Object.entries(nextPins || {}).forEach(([mac, pin]) => {
+          const lower = String(mac || "").toLowerCase();
+          if (!lower || OUT_OF_SERVICE_BEACON_MACS.has(lower)) return;
+          const lat = Number(pin && pin.lat);
+          const lng = Number(pin && pin.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+          droppedBeaconPins[lower] = {
+            lat,
+            lng,
+            dropped_at: pin.dropped_at || null,
+            dropped_by_tracker: pin.dropped_by_tracker || null,
+          };
+        });
+        persistDroppedBeaconPins();
+      }
+
+      function getApiBaseUrl() {
+        const apiUrl = LIVE_API_URL || DATA_SOURCES.motorized_gse || "";
+        return String(apiUrl).replace(/\/data\/?$/, "");
+      }
+
+      async function sendDropToServer(mac, lat, lng, droppedByTracker) {
+        const baseUrl = getApiBaseUrl();
+        const response = await fetch(`${baseUrl}/ble/drop`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAdminHeaders() },
+          body: JSON.stringify({
+            mac,
+            lat,
+            lng,
+            dropped_by_tracker: droppedByTracker || null,
+          }),
+        });
+        if (!response.ok) throw new Error(`drop failed (${response.status})`);
+        const payload = await response.json();
+        if (!payload?.success) throw new Error(payload?.error || "drop failed");
+        if (payload.manual_drop_beacons) {
+          replaceDroppedBeaconPins(payload.manual_drop_beacons);
+        }
+      }
+
+      async function sendAttachToServer(mac) {
+        const baseUrl = getApiBaseUrl();
+        const response = await fetch(`${baseUrl}/ble/attach`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAdminHeaders() },
+          body: JSON.stringify({ mac }),
+        });
+        if (!response.ok) throw new Error(`attach failed (${response.status})`);
+        const payload = await response.json();
+        if (!payload?.success) throw new Error(payload?.error || "attach failed");
+        if (payload.manual_drop_beacons) {
+          replaceDroppedBeaconPins(payload.manual_drop_beacons);
+        } else {
+          delete droppedBeaconPins[String(mac || "").toLowerCase()];
+        }
+      }
+
+      function collectManualDropsFromPayload(payload) {
+        const collected = {};
+        if (!payload || typeof payload !== "object") return collected;
+        const direct = payload.manual_drop_beacons;
+        if (direct && typeof direct === "object") {
+          Object.entries(direct).forEach(([mac, pin]) => {
+            const lower = String(mac || "").toLowerCase();
+            const lat = Number(pin && pin.lat);
+            const lng = Number(pin && pin.lng);
+            if (!lower || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+            collected[lower] = {
+              lat,
+              lng,
+              dropped_at: pin.dropped_at || null,
+              dropped_by_tracker: pin.dropped_by_tracker || null,
+            };
+          });
+        }
+        const ble = payload.ble_positions;
+        if (ble && typeof ble === "object") {
+          Object.entries(ble).forEach(([mac, pos]) => {
+            const lower = String(mac || "").toLowerCase();
+            const lat = Number(pos && pos.lat);
+            const lng = Number(pos && pos.lng);
+            if (!lower || !pos || !pos.manual_drop || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+            collected[lower] = {
+              lat,
+              lng,
+              dropped_at: pos.dropped_at || pos.last_update || null,
+              dropped_by_tracker: pos.dropped_by_tracker || pos.last_tracker_label || null,
+            };
+          });
+        }
+        return collected;
+      }
+
+      function syncDroppedPinsFromPayloads(payloadA, payloadB) {
+        const combined = {
+          ...collectManualDropsFromPayload(payloadA),
+          ...collectManualDropsFromPayload(payloadB),
+        };
+        if (!Object.keys(combined).length) return;
+        replaceDroppedBeaconPins(combined);
+      }
+
       function setDropFromCoordinates(mac, lat, lng) {
         const lower = String(mac || "").toLowerCase();
         const snap = latestBeaconSnapshot[lower] || {};
@@ -1151,68 +1252,14 @@
           return;
         }
         setDropFromCoordinates(lower, snap.lat, snap.lng);
+        try {
+          await sendDropToServer(lower, snap.lat, snap.lng, snap.hostTrackerLabel || snap.hostTrackerId || null);
+        } catch (e) {
+          console.warn("[BLE] Drop save failed, using local fallback", e);
+        }
         if (pendingDropBeaconMac === lower) pendingDropBeaconMac = null;
         setDropPickUi("");
         await loadData();
-      };
-
-      // ── 📍 Drop beacon at phone's current GPS location ───────────────────────
-      // Uses browser Geolocation API (phone GPS ~5m accuracy).
-      // Saves to DB via POST /ble/position so ALL devices see the correct location.
-      // No CAN_ADMIN_CONTROLS guard here — phone GPS drop is available to all users.
-      window.dropBeaconAtMyLocation = async function dropBeaconAtMyLocation(mac) {
-        const lower = String(mac || "").toLowerCase();
-        if (!navigator.geolocation) {
-          alert("Geolocation is not supported by this browser.");
-          return;
-        }
-        const btn = document.activeElement;
-        if (btn) btn.textContent = "⏳ Getting GPS...";
-        navigator.geolocation.getCurrentPosition(
-          async function(position) {
-            const lat = position.coords.latitude;
-            const lng = position.coords.longitude;
-            const acc = Math.round(position.coords.accuracy);
-            const confirmed = confirm(
-              `Drop "${lower}" at:\n${lat.toFixed(6)}, ${lng.toFixed(6)}\nAccuracy: ±${acc}m\n\nConfirm?`
-            );
-            if (!confirmed) { if (btn) btn.textContent = "📍 My Location"; return; }
-            try {
-              // Save to DB (persists across devices and browser clears)
-              const apiBase = (window._apiBase || "").replace(/\/data$/, "");
-              const resp = await fetch(`${apiBase}/ble/position`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  mac: lower,
-                  lat: lat,
-                  lng: lng,
-                  tracker_id: 0,
-                  tracker_label: "Manual-Phone-GPS",
-                  is_paired: false,
-                  pairing_duration_sec: 0,
-                  contact_type: "Dropped Here",
-                }),
-              });
-              const result = await resp.json();
-              if (result.success) {
-                // Also update local pin so map refreshes immediately
-                setDropFromCoordinates(lower, lat, lng);
-                alert(`✅ Saved to DB!\n${lat.toFixed(6)}, ${lng.toFixed(6)} ±${acc}m`);
-                await loadData();
-              } else {
-                alert(`❌ Server error: ${result.error || "unknown"}`);
-              }
-            } catch(err) {
-              alert(`❌ Failed to save: ${err.message}`);
-            }
-          },
-          function(err) {
-            alert(`❌ GPS error: ${err.message}\nMake sure location is enabled.`);
-            if (btn) btn.textContent = "📍 My Location";
-          },
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-        );
       };
 
       window.beginBeaconDropPick = function beginBeaconDropPick(mac) {
@@ -1239,9 +1286,14 @@
           pendingDropBeaconMac = null;
           setDropPickUi("");
         }
-        if (droppedBeaconPins[lower]) {
-          delete droppedBeaconPins[lower];
-          persistDroppedBeaconPins();
+        try {
+          await sendAttachToServer(lower);
+        } catch (e) {
+          console.warn("[BLE] Attach save failed, using local fallback", e);
+          if (droppedBeaconPins[lower]) {
+            delete droppedBeaconPins[lower];
+            persistDroppedBeaconPins();
+          }
         }
         await loadData({ forceRelink: true });
       };
@@ -1578,7 +1630,6 @@
             isPaired: isFollowingTracker,
             pairingDuration: pairingSecondsRaw,
             lastUpdate: pos.last_update,
-            // last_seen = Navixy beacon timestamp (when tracker actually saw it)
             lastSeenAt: pos.last_seen || pos.last_update,
             lastSeen: formatLastSaw(pos.last_seen || pos.last_update),
             hostTrackerId: forcedHost ? forcedHost.id : pos.last_tracker_id,
@@ -1588,8 +1639,6 @@
             isDropped: !!manualDrop,
             droppedAt: manualDrop ? manualDrop.dropped_at : null,
             droppedByTracker: manualDrop ? manualDrop.dropped_by_tracker : null,
-            // Contact type: "Towing" | "Dropped Here" | "Pass Nearby" (from server)
-            contactType: pos.contact_type || null,
           };
           latestBeaconSnapshot[normalizedMac] = {
             lat,
@@ -2830,6 +2879,7 @@
             ]);
             payloadNavixy = res1.status === "fulfilled" ? res1.value : null;
             payloadDirect = res2.status === "fulfilled" ? res2.value : null;
+            syncDroppedPinsFromPayloads(payloadNavixy, payloadDirect);
             lastRows = (payloadNavixy && payloadNavixy.rows) ? payloadNavixy.rows.filter((r) => !isIgnoredTracker(r)) : [];
             if (payloadNavixy && payloadNavixy.ble_positions && Object.keys(blePositions).length === 0) {
               Object.entries(payloadNavixy.ble_positions).forEach(([mac, pos]) => {
@@ -2870,6 +2920,7 @@
               const response = await dataFetch(DATA_SOURCES.direct);
               payloadDirect = response.ok ? await response.json() : null;
             } catch (e) { payloadDirect = null; }
+            syncDroppedPinsFromPayloads(payloadDirect, null);
             lastRows = [];
             const fromBroker = (payloadDirect && payloadDirect.ble_positions) ? payloadDirect.ble_positions : {};
             const combinedBle = { ...DIRECT_BEACON_POSITIONS_FALLBACK };
@@ -2891,6 +2942,7 @@
             const response = await dataFetch(DATA_SOURCES.motorized_gse);
             if (!response.ok) throw new Error("fetch failed");
             payloadNavixy = await response.json();
+            syncDroppedPinsFromPayloads(payloadNavixy, null);
             lastRows = (payloadNavixy.rows || []).filter((r) => !isIgnoredTracker(r));
             if (payloadNavixy.ble_positions && Object.keys(blePositions).length === 0) {
               Object.entries(payloadNavixy.ble_positions).forEach(([mac, pos]) => {
@@ -2934,7 +2986,6 @@
           if (j && j.dataUrl) {
             window.__NAVIXY_DATA_SOURCES.motorized_gse = j.dataUrl;
             window.__NAVIXY_DATA_SOURCES.direct = j.dataUrl;
-            window._apiBase = j.dataUrl; // used by dropBeaconAtMyLocation
           }
           startDataPolling();
         }).catch(function(){ startDataPolling(); });
@@ -2975,6 +3026,17 @@
         if (!targetMac) return;
         pendingDropBeaconMac = null;
         setDropFromCoordinates(targetMac, ev.latlng.lat, ev.latlng.lng);
+        try {
+          const snap = latestBeaconSnapshot[String(targetMac || "").toLowerCase()] || {};
+          await sendDropToServer(
+            targetMac,
+            ev.latlng.lat,
+            ev.latlng.lng,
+            snap.hostTrackerLabel || snap.hostTrackerId || null
+          );
+        } catch (e) {
+          console.warn("[BLE] Map-pick drop save failed, using local fallback", e);
+        }
         setDropPickUi(`Dropped ${targetMac.toUpperCase()} at ${ev.latlng.lat.toFixed(6)}, ${ev.latlng.lng.toFixed(6)}`);
         await loadData();
         setTimeout(() => {

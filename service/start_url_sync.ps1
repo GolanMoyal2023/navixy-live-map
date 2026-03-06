@@ -1,11 +1,10 @@
-# URL Sync Service
-# Monitors tunnel logs and automatically syncs URL changes to GitHub
+# URL Sync Service - v2
+# Monitors cloudflared quick tunnel URL via local REST API and syncs to api-url.json on GitHub
 # Runs as a Windows service - NO human intervention needed
-# Tunnel: NavixyQuickTunnel writes URL to quick_tunnel_stderr.log; this service updates api-url.json and pushes.
 
 $ErrorActionPreference = "Continue"
-$root = if ($PSScriptRoot) { (Resolve-Path (Join-Path $PSScriptRoot "..")).Path } else { (Get-Location).Path }
-$root = $root.TrimEnd("\")
+$root    = "D:\New_Recovery\2Plus\navixy-live-map"
+$newRoot = "D:\New_Recovery\2Plus\navixy-live-map-main-live"
 
 # Setup logging
 $logDir = "$root\service\logs"
@@ -19,67 +18,89 @@ function Write-Log {
 }
 
 Write-Log "=========================================="
-Write-Log "URL Sync Service Started (root: $root)"
+Write-Log "URL Sync Service v2 Started"
+Write-Log "Monitoring cloudflared REST API for quick tunnel URL"
+Write-Log "Updating: $newRoot\api-url.json"
 Write-Log "=========================================="
 
-$urlFile = "$root\.quick_tunnel_url.txt"
-$apiUrlFile = "$root\api-url.json"
-$stderrLog = "$root\service\logs\quick_tunnel_stderr.log"
-$lastSyncedUrl = ""
+$lastSyncedUrl  = ""
+$apiUrlFile     = "$newRoot\api-url.json"
+$checkInterval  = 30   # seconds between URL checks
 
-# Read last synced URL
-if (Test-Path $urlFile) {
-    $lastSyncedUrl = [System.IO.File]::ReadAllText($urlFile).Trim() -replace '/data$', ''
-    Write-Log "Last synced URL: $lastSyncedUrl"
+# Read last known URL
+if (Test-Path $apiUrlFile) {
+    try {
+        $existing = Get-Content $apiUrlFile -Raw | ConvertFrom-Json
+        $lastSyncedUrl = ($existing.dataUrl -replace '/data$', '')
+        Write-Log "Last known URL from api-url.json: $lastSyncedUrl"
+    } catch {
+        Write-Log "Could not parse existing api-url.json"
+    }
 }
 
-function Get-TunnelUrlFromLogs {
-    if (-not (Test-Path $stderrLog)) { return $null }
-    
-    $logContent = Get-Content $stderrLog -Tail 200 -ErrorAction SilentlyContinue
-    $foundUrl = $null
-    
-    foreach ($line in $logContent) {
-        if ($line -match 'https://([a-z0-9-]+\.trycloudflare\.com)') {
-            $foundUrl = "https://$($Matches[1])"
+function Get-CurrentTunnelUrl {
+    # Method 1: cloudflared local metrics REST API (most reliable)
+    $ports = @(20243, 20241, 20242, 2000)
+    foreach ($port in $ports) {
+        try {
+            $r = Invoke-RestMethod "http://127.0.0.1:$port/quicktunnel" -TimeoutSec 3
+            if ($r.hostname) {
+                return "https://$($r.hostname)"
+            }
+        } catch {}
+    }
+
+    # Method 2: Scan stderr log for trycloudflare URL
+    $logPaths = @(
+        "$root\service\logs\quick_tunnel_stderr.log",
+        "C:\Temp\cf_clean.log"
+    )
+    foreach ($lp in $logPaths) {
+        if (Test-Path $lp) {
+            try {
+                $content = [System.IO.File]::ReadAllBytes($lp)
+                # Handle both UTF-8 and UTF-16 (service logs use UTF-16)
+                $text = [System.Text.Encoding]::Unicode.GetString($content)
+                if ($text -notmatch 'trycloudflare\.com') {
+                    $text = [System.Text.Encoding]::UTF8.GetString($content)
+                }
+                $matches = [regex]::Matches($text, 'https://[a-z0-9-]+\.trycloudflare\.com')
+                if ($matches.Count -gt 0) {
+                    return $matches[$matches.Count - 1].Value
+                }
+            } catch {}
         }
     }
-    
-    return $foundUrl
+
+    return $null
 }
 
 function Sync-UrlToGitHub {
-    param($NewUrl)
-    
+    param([string]$NewUrl)
+
     Write-Log "Syncing URL to GitHub: $NewUrl"
-    
+
     try {
-        # Update .quick_tunnel_url.txt (used by dashboard and local refs)
-        "$NewUrl/data" | Out-File -FilePath $urlFile -Encoding UTF8 -NoNewline
-        Write-Log "Updated .quick_tunnel_url.txt"
-        
-        # Update api-url.json (map on GitHub Pages reads this for mobile/external)
-        $dataUrl = "$NewUrl/data"
-        $json = @{ dataUrl = $dataUrl } | ConvertTo-Json -Compress
-        Set-Content -Path $apiUrlFile -Value $json -Encoding UTF8 -NoNewline
-        Write-Log "Updated api-url.json"
-        
-        Set-Location $root
-        $rootEscaped = $root -replace '\\', '/'
-        git config --global --add safe.directory $root 2>&1 | Out-Null
-        git config --global --add safe.directory $rootEscaped 2>&1 | Out-Null
-        git config user.email "navixy-service@localhost" 2>&1 | Out-Null
-        git config user.name "Navixy URL Sync Service" 2>&1 | Out-Null
-        Write-Log "Git configured (safe.directory + identity)"
-        
+        # 1. Update api-url.json
+        $jsonContent = "{`"dataUrl`":`"$NewUrl/data`"}"
+        $noBomUtf8 = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($apiUrlFile, $jsonContent, $noBomUtf8)
+        Write-Log "Updated api-url.json: $jsonContent"
+
+        # 2. Git commit + push
+        Set-Location $newRoot
+        git config --global --add safe.directory $newRoot 2>&1 | Out-Null
+        git config user.email "navixy-urlsync@localhost" 2>&1 | Out-Null
+        git config user.name "Navixy URL Sync" 2>&1 | Out-Null
+
         git add api-url.json 2>&1 | Out-Null
-        $commitResult = git commit -m "Auto-sync tunnel URL (service): $NewUrl" 2>&1
-        Write-Log "Git commit: $commitResult"
-        
-        $pushResult = git push 2>&1
-        Write-Log "Git push: $pushResult"
-        
-        Write-Log "SUCCESS: URL synced to GitHub!"
+        $commitOut = git commit -m "auto: sync tunnel URL $NewUrl" 2>&1
+        Write-Log "git commit: $commitOut"
+
+        $pushOut = git push origin HEAD:main 2>&1
+        Write-Log "git push: $pushOut"
+
+        Write-Log "SUCCESS: URL synced to GitHub."
         return $true
     } catch {
         Write-Log "ERROR syncing URL: $($_.Exception.Message)"
@@ -87,57 +108,46 @@ function Sync-UrlToGitHub {
     }
 }
 
-# Initial wait for tunnel service to start
-Write-Log "Waiting 45 seconds for tunnel service to initialize..."
-Start-Sleep -Seconds 45
+# Wait for cloudflared to start
+Write-Log "Waiting 20 seconds for tunnel services to initialize..."
+Start-Sleep -Seconds 20
 
-# Main monitoring loop
-$checkInterval = 30  # Check every 30 seconds
-$syncAttempted = $false
-
-Write-Log "Starting URL monitoring loop (checking every $checkInterval seconds)..."
+Write-Log "Starting URL monitoring loop (every $checkInterval sec)..."
 
 while ($true) {
     try {
-        $currentUrl = Get-TunnelUrlFromLogs
-        
+        $currentUrl = Get-CurrentTunnelUrl
+
         if ($currentUrl) {
             if ($currentUrl -ne $lastSyncedUrl) {
-                Write-Log "URL CHANGE DETECTED!"
-                Write-Log "  Old: $lastSyncedUrl"
-                Write-Log "  New: $currentUrl"
-                
-                # Wait a few seconds to ensure tunnel is stable
+                Write-Log "URL CHANGE: '$lastSyncedUrl' -> '$currentUrl'"
+
+                # Brief wait to confirm tunnel is stable
                 Start-Sleep -Seconds 5
-                
-                # Verify URL is actually working
+
+                # Verify the URL responds
                 try {
-                    $testResponse = Invoke-WebRequest -Uri "$currentUrl/data" -UseBasicParsing -TimeoutSec 10
-                    if ($testResponse.StatusCode -eq 200) {
-                        Write-Log "URL verified working (Status 200)"
-                        
+                    $test = Invoke-RestMethod "$currentUrl/health" -TimeoutSec 10
+                    if ($test.status -eq "ok") {
+                        Write-Log "URL verified working: $currentUrl/health -> ok"
                         if (Sync-UrlToGitHub -NewUrl $currentUrl) {
                             $lastSyncedUrl = $currentUrl
-                            $syncAttempted = $true
-                            Write-Log "Sync complete. External access should work in ~30 seconds."
+                            Write-Log "Sync complete. Live map should update within ~60 seconds."
                         }
                     } else {
-                        Write-Log "URL returned status $($testResponse.StatusCode), skipping sync"
+                        Write-Log "URL health check returned unexpected: $($test|ConvertTo-Json -Compress)"
                     }
                 } catch {
-                    Write-Log "URL not yet reachable: $($_.Exception.Message)"
+                    Write-Log "URL not reachable yet ($($_.Exception.Message)), will retry..."
                 }
-            } elseif (-not $syncAttempted) {
-                # First run, URL unchanged but verify it's synced
-                Write-Log "URL unchanged: $currentUrl"
-                $syncAttempted = $true
             }
+            # else: URL unchanged, nothing to do
         } else {
-            Write-Log "No tunnel URL found in logs yet..."
+            Write-Log "No active tunnel URL found, waiting..."
         }
     } catch {
         Write-Log "Error in monitoring loop: $($_.Exception.Message)"
     }
-    
+
     Start-Sleep -Seconds $checkInterval
 }

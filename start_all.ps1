@@ -14,10 +14,8 @@ param(
     [switch]$Restart   # Kill existing processes on 8767/8768 before starting
 )
 
-$Root      = "D:\New_Recovery\2Plus\navixy-live-map-main-live"
-# Use the venv from the sibling folder (main-live has no .venv, packages are installed there)
-$VenvRoot  = "D:\New_Recovery\2Plus\navixy-live-map"
-$Python    = "$VenvRoot\.venv\Scripts\python.exe"
+$Root      = "D:\New_Recovery\2Plus\navixy-live-map"
+$Python    = "$Root\.venv\Scripts\python.exe"
 $ApiHash   = "f038d4c96bfc683cdc52337824f7e5f0"
 
 # -------------------------------------------------------
@@ -84,19 +82,23 @@ function Push-ApiUrlJson($jsonContent) {
         if (-not $blobHash) { throw "blob creation failed" }
 
         # Rebuild the tree from origin/main, replacing api-url.json
-        # Write to a temp file first - piping strings to git mktree has encoding issues on Windows
-        $treeLines = git ls-tree "origin/main" | Where-Object { $_ -notmatch "`tapi-url\.json$" }
-        $newEntry   = "100644 blob $blobHash`tapi-url.json"
-        $treeFile   = [IO.Path]::GetTempFileName()
-        [IO.File]::WriteAllLines($treeFile, ($treeLines + $newEntry), [Text.Encoding]::UTF8)
-        $newTree    = (Get-Content $treeFile | git mktree).Trim()
+        # Use no-BOM UTF8 + cmd redirect to avoid CR corruption on Windows
+        $noBom     = New-Object System.Text.UTF8Encoding($false)
+        $treeLines = git ls-tree "origin/main" | Where-Object { $_ -notmatch "api-url\.json" }
+        $newEntry  = "100644 blob $blobHash`tapi-url.json"
+        $treeFile  = [IO.Path]::GetTempFileName()
+        [IO.File]::WriteAllText($treeFile, (($treeLines + $newEntry) -join "`n") + "`n", $noBom)
+        $newTree   = (cmd /c "git mktree < `"$treeFile`"").Trim()
         Remove-Item $treeFile -ErrorAction SilentlyContinue
         if (-not $newTree) { throw "mktree failed" }
 
         # Commit on top of origin/main
-        $parent = (git rev-parse "origin/main").Trim()
-        $msg    = "Auto-sync broker URL $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
-        $newCom = (git commit-tree $newTree -p $parent -m $msg).Trim()
+        $parent  = (git rev-parse "origin/main").Trim()
+        $msg     = "Auto-sync broker URL $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+        $msgFile = [IO.Path]::GetTempFileName()
+        [IO.File]::WriteAllText($msgFile, $msg, $noBom)
+        $newCom  = (cmd /c "git commit-tree $newTree -p $parent -F `"$msgFile`"").Trim()
+        Remove-Item $msgFile -ErrorAction SilentlyContinue
         if (-not $newCom) { throw "commit-tree failed" }
 
         # Push
@@ -220,8 +222,9 @@ if (-not $brokerUrl) {
         $json = "{`"dataUrl`":`"$newDataUrl`"}"
         Write-Host "    new URL: $newDataUrl" -ForegroundColor Gray
 
-        # Also write locally (for reference)
-        Set-Content -Path $apiUrlFile -Value $json -Encoding UTF8 -NoNewline
+        # Write locally with NO BOM (Set-Content -Encoding UTF8 adds BOM in PS5 which breaks browser JSON.parse)
+        $noBomEnc = New-Object System.Text.UTF8Encoding($false)
+        [IO.File]::WriteAllText($apiUrlFile, $json, $noBomEnc)
 
         # Push to origin/main via git plumbing (no branch checkout needed)
         Push-ApiUrlJson $json | Out-Null
