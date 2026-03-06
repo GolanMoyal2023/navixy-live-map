@@ -3,5 +3,5 @@ credentials-file: e42dd40c-8c96-4a5c-911e-66bbd9b3f1ab.json
 
 ingress:
   - hostname: navixy-livemap.moyals.net
-    service: http://127.0.0.1:8765
+    service: http://127.0.0.1:8767
   - service: http_status:404

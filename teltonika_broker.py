@@ -51,6 +51,7 @@ GPS_DRIFT_THRESHOLD_M = 30      # Ignore movements < 30m (GPS drift filter)
 GAP_THRESHOLD_SEC = 300         # 5 minutes = detection gap (assets don't move often)
 SIGNIFICANT_MOVE_M = 100        # Movement > 100m after gap = confirmed new placement
 MAX_SPEED_KMH = 5               # Only update position when speed < 5 km/h (stopped/slow)
+DB_HEARTBEAT_SYNC_SEC = 20      # Persist last-known BLE position heartbeat to SQL
 
 # STABILITY MODE: Only update position on VERY clear towing events
 STABILITY_MODE = True
@@ -66,6 +67,9 @@ ble_positions: Dict[str, Dict[str, Any]] = {}
 
 # BLE pairing tracking: { mac: { tracker_imei, start_time } }
 ble_pairing: Dict[str, Dict[str, Any]] = {}
+
+# Last SQL heartbeat sync per beacon (throttle DB writes while stationary)
+ble_db_last_sync: Dict[str, datetime] = {}
 
 # Known BLE definitions - YOUR 5 BEACONS
 # Only these will be tracked, all others ignored
@@ -523,6 +527,53 @@ def calculate_distance_meters(lat1: float, lng1: float, lat2: float, lng2: float
     return R * c
 
 
+def _sync_ble_position_sql(
+    mac: str,
+    lat: Any,
+    lng: Any,
+    tracker_id: Any,
+    tracker_label: str,
+    is_paired: bool,
+    pairing_duration_sec: int,
+    battery_percent: Any = None,
+    magnet_status: Any = None,
+    now: Optional[datetime] = None,
+    force: bool = False,
+) -> bool:
+    """Persist BLE last-known position to SQL, throttled unless forced."""
+    if not DB_ENABLED:
+        return False
+    try:
+        lat_f = float(lat)
+        lng_f = float(lng)
+    except (TypeError, ValueError):
+        return False
+
+    ts = now or datetime.now()
+    if not force:
+        last_sync = ble_db_last_sync.get(mac)
+        if last_sync and (ts - last_sync).total_seconds() < DB_HEARTBEAT_SYNC_SEC:
+            return False
+
+    try:
+        db_helper.update_ble_position(
+            mac=mac,
+            lat=lat_f,
+            lng=lng_f,
+            tracker_id=tracker_id,
+            tracker_label=tracker_label,
+            is_paired=is_paired,
+            pairing_duration_sec=int(pairing_duration_sec or 0),
+            battery_percent=battery_percent,
+            magnet_status=str(magnet_status) if magnet_status is not None else None,
+        )
+        ble_db_last_sync[mac] = ts
+        return True
+    except Exception as e:
+        logger.error(f"[DB] BLE position sync error for {mac}: {e}")
+        return False
+
+
 def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: List[Dict[str, Any]], tracker_speed: float = 0):
     """
     Process BLE beacons with IMPROVED positioning logic:
@@ -613,18 +664,22 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                     ble_pairing[mac] = {"tracker_imei": imei, "start_time": now}
                     logger.info(f"BLE {mac} ({beacon_name}): DETECTED WHILE MOVING ({tracker_speed:.1f} km/h) - waiting for stop")
                 
-                # Save to database
-                if DB_ENABLED:
-                    try:
-                        db_helper.update_ble_position(
-                            mac=mac, lat=tracker_lat, lng=tracker_lng,
-                            tracker_id=imei, tracker_label=imei,
-                            is_paired=False, pairing_duration_sec=0,
-                            battery_percent=beacon.get("battery"),
-                            magnet_status=str(beacon.get("magnet_status")) if beacon.get("magnet_status") else None,
-                        )
-                    except Exception as e:
-                        logger.error(f"[DB] Error saving first position: {e}")
+                # Save to database only when we have a valid first position.
+                # For moving pass-by detections, keep SQL unchanged until stop/pairing logic confirms.
+                if is_stopped:
+                    _sync_ble_position_sql(
+                        mac=mac,
+                        lat=tracker_lat,
+                        lng=tracker_lng,
+                        tracker_id=imei,
+                        tracker_label=trackers.get(imei, {}).get("label", imei),
+                        is_paired=False,
+                        pairing_duration_sec=0,
+                        battery_percent=beacon.get("battery"),
+                        magnet_status=beacon.get("magnet_status"),
+                        now=now,
+                        force=True,
+                    )
                 continue
             
             # ============================================================
@@ -661,17 +716,19 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                     ble_positions[mac]["lat"] = tracker_lat
                     ble_positions[mac]["lng"] = tracker_lng
                     logger.info(f"BLE {mac} ({beacon_name}): NOW STOPPED - setting position ({tracker_lat:.6f}, {tracker_lng:.6f})")
-                    if DB_ENABLED:
-                        try:
-                            db_helper.update_ble_position(
-                                mac=mac, lat=tracker_lat, lng=tracker_lng,
-                                tracker_id=imei, tracker_label=imei,
-                                is_paired=False, pairing_duration_sec=0,
-                                battery_percent=beacon.get("battery"),
-                                magnet_status=str(beacon.get("magnet_status")) if beacon.get("magnet_status") else None,
-                            )
-                        except Exception as e:
-                            logger.error(f"[DB] Error setting position: {e}")
+                    _sync_ble_position_sql(
+                        mac=mac,
+                        lat=tracker_lat,
+                        lng=tracker_lng,
+                        tracker_id=imei,
+                        tracker_label=trackers.get(imei, {}).get("label", imei),
+                        is_paired=False,
+                        pairing_duration_sec=0,
+                        battery_percent=beacon.get("battery"),
+                        magnet_status=beacon.get("magnet_status"),
+                        now=now,
+                        force=True,
+                    )
                 else:
                     logger.debug(f"BLE {mac}: Still moving ({tracker_speed:.1f} km/h), waiting for stop")
                 continue
@@ -704,6 +761,20 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
             # Pairing status already updated above - map always stays current
             # ============================================================
             if distance_m < GPS_DRIFT_THRESHOLD_M:
+                # Keep SQL in sync with last-known position + fresh timestamps even without movement.
+                _sync_ble_position_sql(
+                    mac=mac,
+                    lat=ble_positions[mac].get("lat"),
+                    lng=ble_positions[mac].get("lng"),
+                    tracker_id=imei,
+                    tracker_label=trackers.get(imei, {}).get("label", imei),
+                    is_paired=is_paired,
+                    pairing_duration_sec=int(pairing_duration),
+                    battery_percent=beacon.get("battery"),
+                    magnet_status=beacon.get("magnet_status"),
+                    now=now,
+                    force=False,
+                )
                 logger.debug(f"BLE {mac}: No movement ({distance_m:.1f}m), paired={is_paired}, duration={int(pairing_duration)}s")
                 continue
 
@@ -718,18 +789,20 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                 ble_pairing[mac] = {"tracker_imei": imei, "start_time": now}
                 pairing_duration = 0
                 is_paired = True
-                if DB_ENABLED:
-                    try:
-                        db_helper.update_ble_position(
-                            mac=mac, lat=tracker_lat, lng=tracker_lng,
-                            tracker_id=imei, tracker_label=imei,
-                            is_paired=True, pairing_duration_sec=int(gap_seconds),
-                            battery_percent=beacon.get("battery"),
-                            magnet_status=str(beacon.get("magnet_status")) if beacon.get("magnet_status") else None,
-                        )
-                        logger.info(f"[DB] Updated BLE position after gap: {mac}")
-                    except Exception as e:
-                        logger.error(f"[DB] Error updating position: {e}")
+                if _sync_ble_position_sql(
+                    mac=mac,
+                    lat=tracker_lat,
+                    lng=tracker_lng,
+                    tracker_id=imei,
+                    tracker_label=trackers.get(imei, {}).get("label", imei),
+                    is_paired=True,
+                    pairing_duration_sec=int(gap_seconds),
+                    battery_percent=beacon.get("battery"),
+                    magnet_status=beacon.get("magnet_status"),
+                    now=now,
+                    force=True,
+                ):
+                    logger.info(f"[DB] Updated BLE position after gap: {mac}")
                 continue
 
             # ============================================================
@@ -740,22 +813,20 @@ def process_beacons(imei: str, tracker_lat: float, tracker_lng: float, beacons: 
                 logger.info(f"BLE {mac} ({beacon_name}): TOWING ({pairing_duration:.0f}s), moved {distance_m:.0f}m -> UPDATING")
                 ble_positions[mac]["lat"] = tracker_lat
                 ble_positions[mac]["lng"] = tracker_lng
-                if DB_ENABLED:
-                    try:
-                        db_helper.update_ble_position(
-                            mac=mac,
-                            lat=tracker_lat,
-                            lng=tracker_lng,
-                            tracker_id=imei,
-                            tracker_label=imei,
-                            is_paired=True,
-                            pairing_duration_sec=int(pairing_duration),
-                            battery_percent=beacon.get("battery"),
-                            magnet_status=str(beacon.get("magnet_status")) if beacon.get("magnet_status") else None,
-                        )
-                        logger.info(f"[DB] Updated BLE position during towing: {mac}")
-                    except Exception as e:
-                        logger.error(f"DB save error: {e}")
+                if _sync_ble_position_sql(
+                    mac=mac,
+                    lat=tracker_lat,
+                    lng=tracker_lng,
+                    tracker_id=imei,
+                    tracker_label=trackers.get(imei, {}).get("label", imei),
+                    is_paired=True,
+                    pairing_duration_sec=int(pairing_duration),
+                    battery_percent=beacon.get("battery"),
+                    magnet_status=beacon.get("magnet_status"),
+                    now=now,
+                    force=True,
+                ):
+                    logger.info(f"[DB] Updated BLE position during towing: {mac}")
             else:
                 logger.debug(f"BLE {mac}: Waiting for 60s pairing ({pairing_duration:.0f}s so far)")
             
@@ -883,6 +954,42 @@ def handle_client(client_socket: socket.socket, address: tuple):
                                     lng=lng,
                                     speed=speed
                                 )
+                                
+                                # Insert direct live data
+                                timestamp_dt = None
+                                if record.get("timestamp"):
+                                    timestamp_dt = datetime.fromisoformat(record["timestamp"])
+                                else:
+                                    timestamp_dt = datetime.now()
+                                    
+                                raw_log_line = f"{timestamp_dt.strftime('%Y-%m-%d %H:%M:%S')} [INFO] [TCP] {imei}: {len(beacons)} beacons at ({lat:.6f}, {lng:.6f}), Speed: {speed:.1f} km/h"
+                                
+                                if beacons:
+                                    for b in beacons:
+                                        db_helper.insert_tracker_live_data(
+                                            timestamp=timestamp_dt,
+                                            imei=imei,
+                                            beacon_mac=b.get("mac"),
+                                            lat=lat,
+                                            lng=lng,
+                                            speed=speed,
+                                            battery=b.get("battery"),
+                                            rssi=b.get("rssi"),
+                                            raw_log_line=raw_log_line
+                                        )
+                                else:
+                                    db_helper.insert_tracker_live_data(
+                                        timestamp=timestamp_dt,
+                                        imei=imei,
+                                        beacon_mac=None,
+                                        lat=lat,
+                                        lng=lng,
+                                        speed=speed,
+                                        battery=None,
+                                        rssi=None,
+                                        raw_log_line=raw_log_line
+                                    )
+                                    
                             except Exception as e:
                                 logger.error(f"DB tracker save error: {e}")
                     
@@ -932,7 +1039,7 @@ app = Flask(__name__)
 def add_cors(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, ngrok-skip-browser-warning"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, ngrok-skip-browser-warning, bypass-tunnel-reminder"
     return response
 
 
@@ -1388,15 +1495,15 @@ def rutx11_webhook():
                 mac = b["mac"]
                 rssi = b["rssi"]
                 battery = b["battery"]
+                prev = ble_positions.get(mac, {})
 
                 # Look up known beacon definition
                 bdef = ble_definitions.get(mac, {})
                 beacon_name  = b["name"] or bdef.get("name") or mac
                 is_known     = mac in ble_definitions
 
-                # Only update position if we have scanner coordinates
+                # Only update position when scanner coordinates are provided by the webhook.
                 if scanner_lat is not None and scanner_lng is not None:
-                    prev = ble_positions.get(mac, {})
                     ble_positions[mac] = {
                         "mac":          mac,
                         "name":         beacon_name,
@@ -1415,17 +1522,18 @@ def rutx11_webhook():
                     }
 
                     # Store to BLE_Positions in DB
-                    if DB_ENABLED:
-                        try:
-                            db_helper.update_ble_position(
-                                mac=mac, lat=scanner_lat, lng=scanner_lng,
-                                tracker_id=f"rutx11:{scanner_id}",
-                                tracker_label=scanner_id,
-                                is_paired=True,
-                                battery_percent=battery,
-                            )
-                        except Exception as db_err:
-                            logger.warning(f"[RUTX11] DB BLE_Positions error: {db_err}")
+                    _sync_ble_position_sql(
+                        mac=mac,
+                        lat=scanner_lat,
+                        lng=scanner_lng,
+                        tracker_id=f"rutx11:{scanner_id}",
+                        tracker_label=scanner_id,
+                        is_paired=True,
+                        pairing_duration_sec=0,
+                        battery_percent=battery,
+                        now=now,
+                        force=True,
+                    )
 
                 # Always store raw scan event to BLE_Scans (historical log)
                 if DB_ENABLED:
