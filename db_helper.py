@@ -474,6 +474,104 @@ def get_rutx11_scanners() -> Dict[str, Dict[str, Any]]:
     return scanners
 
 
+def upsert_tracker_navixy_live(
+    tracker_id: int,
+    label: str,
+    imei: str = None,
+    lat: float = None,
+    lng: float = None,
+    speed: float = None,
+    altitude: float = None,
+    course: float = None,
+    satellites: int = None,
+    gsm_signal: int = None,
+    battery_level: int = None,
+    ignition: bool = None,
+    movement: bool = None,
+    gps_updated: str = None,
+    beacon_mac: str = None,
+    rssi: float = None,
+    battery: float = None,
+) -> bool:
+    """Historical high-density log for Navixy data with beacon support and deadlock retry."""
+    import time
+    from datetime import datetime
+    for attempt in range(3):
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            gps_dt = None
+            if gps_updated:
+                try:
+                    if isinstance(gps_updated, datetime):
+                        gps_dt = gps_updated
+                    else:
+                        gps_dt = datetime.fromisoformat(str(gps_updated).replace("Z", "+00:00")) if "T" in str(gps_updated) else datetime.strptime(str(gps_updated)[:19], "%Y-%m-%d %H:%M:%S")
+                except Exception: pass
+            cursor.execute("""
+                INSERT INTO Tracker_Navixy_Live 
+                (tracker_id, label, imei, lat, lng, speed, altitude, course, satellites, 
+                 ignition, movement, gps_updated, battery_level, gsm_signal, 
+                 beacon_mac, rssi, battery, navixy_synced)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+            """, tracker_id, label, imei, lat, lng, speed, altitude, course, satellites,
+                 ignition, movement, gps_dt, battery_level, gsm_signal, 
+                 beacon_mac, rssi, battery)
+            conn.commit()
+            return True
+        except Exception as e:
+            if "deadlock" in str(e).lower() and attempt < 2:
+                time.sleep(0.1 * (attempt+1))
+                continue
+            print(f"[DB ERROR] upsert_tracker_navixy_live log: {e}")
+            return False
+    return False
+
+
+def get_all_tracker_aggregates() -> list:
+    """Get latest record for each (imei, beacon_mac) pair from Tracker_Aggregate."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            WITH LatestRecords AS (
+                SELECT imei, label, lat, lng, speed, altitude, course, satellites, 
+                       ignition, movement, gps_updated, battery_level, gsm_signal, 
+                       winner_source, beacon_mac, rssi, battery,
+                       ROW_NUMBER() OVER (PARTITION BY imei, beacon_mac ORDER BY id DESC) as rn
+                FROM Tracker_Aggregate
+            )
+            SELECT imei, label, lat, lng, speed, altitude, course, satellites, 
+                   ignition, movement, gps_updated, battery_level, gsm_signal, 
+                   winner_source, beacon_mac, rssi, battery
+            FROM LatestRecords
+            WHERE rn = 1
+        """)
+        
+        aggregates = []
+        for row in cursor.fetchall():
+            aggregates.append({
+                "imei": row[0], "label": row[1],
+                "lat": float(row[2]) if row[2] is not None else None,
+                "lng": float(row[3]) if row[3] is not None else None,
+                "speed": float(row[4]) if row[4] is not None else None,
+                "altitude": float(row[5]) if row[5] is not None else None,
+                "course": float(row[6]) if row[6] is not None else None,
+                "satellites": row[7],
+                "ignition": bool(row[8]) if row[8] is not None else None,
+                "movement": bool(row[9]) if row[9] is not None else None,
+                "gps_updated": row[10].isoformat() if row[10] else None,
+                "battery_level": row[11], "gsm_signal": row[12],
+                "winner_source": row[13], "beacon_mac": row[14],
+                "rssi": float(row[15]) if row[15] is not None else None,
+                "battery": float(row[16]) if row[16] is not None else None,
+            })
+        return aggregates
+    except Exception as e:
+        print(f"[DB ERROR] get_all_tracker_aggregates: {e}")
+        return []
+
+
 # Test connection on import
 if __name__ == "__main__":
     print("Testing database connection...")

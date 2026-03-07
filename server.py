@@ -613,19 +613,39 @@ def data() -> Any:
         readings = readings_resp if readings_resp.get("success") else {}
         row = _build_row(tracker, state_resp.get("state", {}), readings)
 
-        # Store tracker position in database
-        if DB_ENABLED and row.get("lat") and row.get("lng"):
+        # Store high-density log for both tracker and beacons
+        if DB_ENABLED:
             try:
-                db_helper.update_tracker(
+                # 1. Log base tracker row
+                db_helper.upsert_tracker_navixy_live(
                     tracker_id=tracker_id,
                     label=row.get("label", ""),
-                    lat=float(row["lat"]),
-                    lng=float(row["lng"]),
+                    imei=row.get("imei"),
+                    lat=row.get("lat"),
+                    lng=row.get("lng"),
                     speed=row.get("speed"),
-                    battery_percent=row.get("battery_level")
+                    gps_updated=row.get("gps_updated"),
+                    battery_level=row.get("battery_level"),
+                    gsm_signal=row.get("gsm_signal"),
+                    ignition=row.get("ignition"),
+                    movement=row.get("movement_status") == "moving"
                 )
+                # 2. Log per-beacon rows
+                for b in row.get("beacons", []):
+                    db_helper.upsert_tracker_navixy_live(
+                        tracker_id=tracker_id,
+                        label=row.get("label", ""),
+                        imei=row.get("imei"),
+                        lat=row.get("lat"),
+                        lng=row.get("lng"),
+                        speed=row.get("speed"),
+                        gps_updated=row.get("gps_updated"),
+                        beacon_mac=b.get("mac"),
+                        rssi=b.get("rssi"),
+                        battery=b.get("battery")
+                    )
             except Exception as e:
-                print(f"[DB] Error saving tracker {tracker_id}: {e}")
+                print(f"[DB] Error saving high-density log for {tracker_id}: {e}")
 
         # ── Enrich beacons + robust position tracking ─────────────────────
         tracker_lat = row.get("lat")
@@ -701,6 +721,52 @@ def data() -> Any:
                 if beacon.get("last_seen"):
                     pos["last_seen"] = beacon["last_seen"]
 
+    # ── Merge latest aggregate state from other sources (Teltonika) ──
+    if DB_ENABLED:
+        try:
+            agg_list = db_helper.get_all_tracker_aggregates()
+            agg_map = {}
+            for agg in agg_list:
+                imei = agg.get("imei")
+                if imei not in agg_map: agg_map[imei] = []
+                agg_map[imei].append(agg)
+            for r in rows:
+                imei = r.get("imei")
+                if imei in agg_map:
+                    track_aggs = agg_map[imei]
+                    tracker_agg = next((a for a in track_aggs if a.get("beacon_mac") is None), track_aggs[0])
+                    agg_gps_str = tracker_agg.get("gps_updated")
+                    navixy_gps_str = r.get("gps_updated")
+                    if agg_gps_str and (not navixy_gps_str or agg_gps_str > navixy_gps_str):
+                        r.update({
+                            "lat": tracker_agg.get("lat"),
+                            "lng": tracker_agg.get("lng"),
+                            "speed": tracker_agg.get("speed"),
+                            "gps_updated": agg_gps_str,
+                            "winner_source": tracker_agg.get("winner_source", "aggregate")
+                        })
+                    # Add/Update beacons from SQL
+                    existing_beacons = {b.get("mac").lower(): b for b in r.get("beacons", []) if b.get("mac")}
+                    for agg in track_aggs:
+                        mac = agg.get("beacon_mac")
+                        if mac:
+                            mac_l = mac.lower()
+                            b_data = {
+                                "mac": mac, 
+                                "rssi": agg.get("rssi"), 
+                                "battery": agg.get("battery"), 
+                                "lat": agg.get("lat"), 
+                                "lng": agg.get("lng"), 
+                                "gps_updated": agg.get("gps_updated"), 
+                                "source": agg.get("winner_source")
+                            }
+                            if mac_l in existing_beacons:
+                                existing_beacons[mac_l].update(b_data)
+                            else:
+                                if "beacons" not in r: r["beacons"] = []
+                                r["beacons"].append(b_data)
+        except Exception as _agg_e: print(f"[DB] Aggregate merge error: {_agg_e}")
+
     return jsonify({
         "success": True,
         "rows": rows,
@@ -710,4 +776,4 @@ def data() -> Any:
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8080")), debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8767")), debug=False)

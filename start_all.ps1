@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Navixy Live Map - Start all services
 .DESCRIPTION
@@ -49,8 +49,12 @@ function Get-NgrokTunnels() {
     catch { return @() }
 }
 
-function Add-NgrokHttpTunnel($port, $name) {
-    $body = @{ name=$name; proto="http"; addr="$port" } | ConvertTo-Json
+function Add-NgrokHttpTunnel($port, $name, $domain = $null) {
+    if ($domain) {
+        $body = @{ name=$name; proto="http"; addr="$port"; hostname="$domain" } | ConvertTo-Json
+    } else {
+        $body = @{ name=$name; proto="http"; addr="$port" } | ConvertTo-Json
+    }
     try {
         $r = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:4040/api/tunnels" `
              -ContentType "application/json" -Body $body -ErrorAction Stop
@@ -168,32 +172,33 @@ if (Test-PortListening 8767) {
 }
 
 # ================================================================
-# STEP 3 - NGROK HTTP TUNNEL (broker :8768)
+# STEP 3 - NGROK HTTP TUNNEL (Navixy consolidated :8767)
 # ================================================================
-Write-Step "3/4" "ngrok HTTP tunnel  (:8768 -> public HTTPS)"
+Write-Step "3/4" "ngrok HTTP tunnel  (:8767 -> public HTTPS)"
 
-$brokerUrl = $null
+$navixyUrl = $null
 $tunnels = Get-NgrokTunnels
 
 if ($tunnels.Count -eq 0) {
     Write-Err "ngrok is not running (port 4040 not responding)"
-    Write-Host "        Start ngrok first:  ngrok tcp 15027  (or run service\start_ngrok.ps1)" -ForegroundColor Gray
+    Write-Host "        Start ngrok first:  ngrok tcp 15027" -ForegroundColor Gray
 } else {
-    # Look for existing HTTP tunnel on 8768
+    # Look for existing HTTP tunnel on 8767
     foreach ($t in $tunnels) {
-        if ($t.proto -in @("https","http") -and $t.config.addr -match "8768") {
-            $brokerUrl = $t.public_url -replace "^http://","https://"
-            Write-Skip "tunnel already exists: $brokerUrl"
+        if ($t.proto -in @("https","http") -and $t.config.addr -match "8767") {
+            $navixyUrl = $t.public_url -replace "^http://","https://"
+            Write-Skip "tunnel already exists: $navixyUrl"
             break
         }
     }
 
-    if (-not $brokerUrl) {
+    if (-not $navixyUrl) {
         Write-Host "    adding tunnel..." -ForegroundColor Gray
-        $brokerUrl = Add-NgrokHttpTunnel 8768 "broker_http"
-        if ($brokerUrl) {
-            $brokerUrl = $brokerUrl -replace "^http://","https://"
-            Write-OK "$brokerUrl"
+        # Try custom domain for paid account
+        $navixyUrl = Add-NgrokHttpTunnel 8767 "navixy_http" "2plusnavixy.ngrok.app"
+        if ($navixyUrl) {
+            $navixyUrl = $navixyUrl -replace "^http://","https://"
+            Write-OK "$navixyUrl"
         } else {
             Write-Err "could not create HTTP tunnel (check ngrok plan / quota)"
         }
@@ -205,10 +210,10 @@ if ($tunnels.Count -eq 0) {
 # ================================================================
 Write-Step "4/4" "Sync api-url.json to GitHub Pages"
 
-if (-not $brokerUrl) {
-    Write-Warn "no broker URL - skipping api-url.json update"
+if (-not $navixyUrl) {
+    Write-Warn "no consolidated URL - skipping api-url.json update"
 } else {
-    $newDataUrl  = "$brokerUrl/data"
+    $newDataUrl  = "$navixyUrl/data"
     $apiUrlFile  = "$Root\api-url.json"
     $currentUrl  = $null
 
