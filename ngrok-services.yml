@@ -6,9 +6,7 @@ tunnels:
   # Fixed domain - never changes on restart
   navixy_http:
     proto: http
-    addr: 8767
-    domain: absently-dispensible-chanel.ngrok-free.dev
-    pooling-enabled: true
-
+    addr: 8768
+    domain: 2plusnavixy.ngrok.app
   # TCP tunnel REMOVED - FMC now sends directly to 89.37.238.8:15027
   # via RUT200 port forwarding → PC local IP 192.168.1.228:15027

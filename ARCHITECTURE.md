@@ -38,10 +38,10 @@ This system provides real-time tracking and visualization of:
 │      HTTP API                    HTTP:8768                                   │
 │      (Navixy)                    (Broker)                                    │
 │            │                          │                                      │
-│            ▼                          ▼                                      │
-│   ┌─────────────────┐         ┌────────────────┐                             │
-│   │  API Server     │         │  (same server) │                             │
-│   │  (Port 8765/67) │         │                │                             │
+│            ▼                          │                                      │
+│   ┌─────────────────┐         ┌───────▼────────┐                             │
+│   │  API Server     │         │  Ngrok Tunnel  │                             │
+│   │  (Port 8765/67) │         │   .ngrok.app   │                             │
 │   └────────┬────────┘         └───────┬────────┘                             │
 │            │                          │                                      │
 │            └──────────┬───────────────┘                                      │

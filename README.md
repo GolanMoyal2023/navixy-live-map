@@ -8,7 +8,7 @@ Real-time tracking and visualization of airport ground support equipment (GSE):
 
 ## 🏗️ Architecture
 
-```
+```text
 ┌──────────┐     ┌──────────┐
 │  Eye     │◄BLE─│ FMC650   │
 │  Beacons │     │ FMC003   │
@@ -16,12 +16,15 @@ Real-time tracking and visualization of airport ground support equipment (GSE):
                       │
         ┌─────────────┴─────────────┐
         ▼                           ▼
-┌───────────────┐         ┌────────────────┐
-│    NAVIXY     │         │  LOCAL BROKER  │     ┌──────────┐
-│   (Cloud)     │         │  (Port 15027)  │─────│ SQL      │
-│   1 BLE/track │         │  ALL BLEs      │     │ Server   │
+┌───────────────┐         ┌────────────────┐     ┌──────────┐
+│    NAVIXY     │         │  LOCAL BROKER  │─────│ SQL      │
+│   (Cloud)     │         │  (Port 15027)  │     │ Server   │
 └───────┬───────┘         └───────┬────────┘     └──────────┘
-        │                         │
+        │                         │ HTTP (8768)
+        │                 ┌───────┴────────┐
+        │                 │ Ngrok Tunnel   │
+        │                 │ .ngrok.app     │
+        │                 └───────┬────────┘
         └────────────┬────────────┘
                      ▼
               ┌────────────┐
@@ -42,21 +45,14 @@ Real-time tracking and visualization of airport ground support equipment (GSE):
 
 ## 🚀 Quick Start (run locally)
 
-**Terminal 1 – broker (TCP 15027 + HTTP 8768):**
+**Start all Services + Ngrok Tunnel:**
 ```powershell
-cd D:\2Plus\Services\navixy-live-map
-.\.venv\Scripts\python.exe teltonika_broker.py
+cd D:\2Plus\navixy-live-map
+.\start_all.ps1 -Restart
 ```
+*This script will automatically start the Broker (`8768`), the Navixy Proxy (`8767`), bind the data API to Ngrok, and push the live URLs to GitHub Pages.*
 
-**Terminal 2 – test data + map:**
-```powershell
-cd D:\2Plus\Services\navixy-live-map
-.\.venv\Scripts\python.exe send_test_avl.py   # optional: inject 1 tracker + BLE
-.\run_local.ps1                                # starts map server, opens browser
-```
-Or manually: `python -m http.server 8080` then open **http://127.0.0.1:8080/index.html** and use **Data: Direct**.
-
-**One-time setup:** `pip install flask requests pyodbc` in the venv; run `setup_database.py` if using SQL Server.
+**One-time setup:** Install ngrok and run `pip install flask requests pyodbc` in the `.venv`. Run `setup_database.py` if initializing the SQL Server for the first time.
 
 ## 🔌 Ports
 

@@ -7,6 +7,11 @@
 
 ## Step-by-Step Summary of What We Did Today
 
+### [NEW] March 2026: Real-Time Direct SQL Ingestion & Ngrok
+- **Direct Database Integration:** Shifted from historical log parsing to real-time direct SQL insertion using `teltonika_broker.py` and `insert_tracker_live_data` in `db_helper.py`.
+- **Public Map API:** Migrated from Cloudflare tunnels to Ngrok using a dedicated custom domain (`2plusnavixy.ngrok.app`).
+- **Live Map Feed (GitHub Pages):** The local `start_all.ps1` script now automatically binds the ngrok endpoint to Port 8768 and syncs the URL to `api-url.json`, pushing the live location to the public internet seamlessly.
+
 ### 1. Beacon popup: Battery and “Last saw”
 - **Frontend (index.html):**  
   - Battery: support both volts (2.0–3.0) and percent (0–100) from broker; fallback text “N/A (not reported)”.  
