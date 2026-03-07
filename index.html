@@ -542,6 +542,13 @@
         box-shadow: 0 1px 3px rgba(0,0,0,0.35);
         padding: 0 4px;
       }
+      .stale-data .tooltip-text {
+        opacity: 0.5;
+        font-style: italic;
+      }
+      .stale-data .leaflet-marker-icon {
+        filter: grayscale(1) opacity(0.6);
+      }
     </style>
   </head>
   <body>
@@ -732,14 +739,12 @@
       // Known Teltonika Eye Beacons/Sensors (matches BLE_Definitions + seed_beacon_data.sql)
       const KNOWN_BEACONS = {
         "7CD9F407F95C": { name: "Eybe2plus1", sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
-        "7CD9F4003536": { name: "Eybe2plus2", sn: "6204011168", type: "eye_beacon", category: "Equipment" },
         "7CD9F406427B": { name: "EyeBe3", sn: "", type: "eye_beacon", category: "Equipment" },
         "7CD9F407A2DB": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7CD9F4116EE7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
         "7CD9F4106A58": { name: "Beacon 6A58", sn: "", type: "eye_beacon", category: "Uncategorized" },
         "720EAF059935": { name: "Beacon 9935", sn: "", type: "eye_beacon", category: "Uncategorized" },
         "7cd9f407f95c": { name: "Eybe2plus1", sn: "6204011070", type: "eye_beacon", category: "Towed Device" },
-        "7cd9f4003536": { name: "Eybe2plus2", sn: "6204011168", type: "eye_beacon", category: "Equipment" },
         "7cd9f406427b": { name: "EyeBe3", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f407a2db": { name: "EyeBe4", sn: "", type: "eye_beacon", category: "Equipment" },
         "7cd9f4116ee7": { name: "Eysen2plus", sn: "6134010143", type: "eye_sensor", category: "Safety" },
@@ -759,7 +764,6 @@
       };
       const BLE_ALLOWED_TRACKER_TOKENS = ["skoda", "5032", "6074"];
       const OUT_OF_SERVICE_BEACON_MACS = new Set([
-        "7cd9f4003536", // broken, out of service
         "720eaf059935", // unknown/temporary - hide during stabilization phase
       ]);
       // Fixed business mapping requested by operations:
@@ -1418,17 +1422,52 @@
         const hostHint = FORCED_BEACON_HOST_BY_MAC[String(mac || "").toLowerCase()];
         if (!hostHint || !Array.isArray(trackerRows)) return null;
         const needle = hostHint.toLowerCase();
+        let bestMatch = null;
+        let freshestAge = Infinity;
+
         for (const row of trackerRows) {
           const label = String(row?.label || "").toLowerCase();
           const id = String(row?.tracker_id || "").toLowerCase();
           const lat = Number(row?.lat);
           const lng = Number(row?.lng);
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+          
           if (label.includes(needle) || id.includes(needle)) {
-            return { lat, lng, label: normalizeTrackerLabel(row.label || row.tracker_id), id: row.tracker_id };
+            const gpsTime = new Date(row.gps_updated).getTime();
+            const age = (Date.now() - gpsTime) / 60000;
+            
+            // If primary host is fresh enough, use it
+            if (age < 10) {
+                return { lat, lng, label: normalizeTrackerLabel(row.label || row.tracker_id), id: row.tracker_id, age };
+            }
+            // Otherwise, keep track of it as a fallback
+            if (age < freshestAge) {
+                freshestAge = age;
+                bestMatch = { lat, lng, label: normalizeTrackerLabel(row.label || row.tracker_id), id: row.tracker_id, age };
+            }
           }
         }
-        return null;
+        
+        // If primary host is stale (> 10 min), try to find ANY fresh tracker to follow
+        if (bestMatch && bestMatch.age > 10) {
+            const alternative = trackerRows.find(r => {
+                const age = (Date.now() - new Date(r.gps_updated).getTime()) / 60000;
+                return age < 10 && !isIgnoredTracker(r) && !isXGpsHumanAgent(r);
+            });
+            if (alternative) {
+                console.log(`[BLE] Host ${bestMatch.label} is stale (${Math.round(bestMatch.age)}m). Failing over to ${alternative.label}`);
+                return { 
+                    lat: Number(alternative.lat), 
+                    lng: Number(alternative.lng), 
+                    label: normalizeTrackerLabel(alternative.label || alternative.tracker_id), 
+                    id: alternative.tracker_id,
+                    isFailover: true,
+                    originalHost: bestMatch.label
+                };
+            }
+        }
+
+        return bestMatch;
       }
 
       function applyStrictBeaconInventory(combinedBle) {
@@ -2573,8 +2612,11 @@
             const iconPath = iconPathForRow(row);
             const size = markerSizeForZoom(map.getZoom());
             const distanceMetersValue = updateDistance(id, lat, lng);
+            const gpsAgeMin = (Date.now() - new Date(row.gps_updated).getTime()) / 60000;
+            const isStale = gpsAgeMin > 10;
             const moving = isMoving(row) || distanceMetersValue > MOVE_DISTANCE_METERS;
-            const labelClass = statusClass(row, moving, distanceMetersValue);
+            let labelClass = statusClass(row, moving, distanceMetersValue);
+            if (isStale) labelClass += " stale-data";
             const spreadOffset = getSpreadOffset(lat, lng, `tracker_${id}`);
             const markerLat = lat + spreadOffset.lat;
             const markerLng = lng + spreadOffset.lng;
@@ -2600,8 +2642,11 @@
           const iconPath = iconPathForRow(row);
           const size = markerSizeForZoom(map.getZoom());
           const distanceMetersValue = updateDistance(id, lat, lng);
+          const gpsAgeMin = (Date.now() - new Date(row.gps_updated).getTime()) / 60000;
+          const isStale = gpsAgeMin > 10;
           const moving = isMoving(row) || distanceMetersValue > MOVE_DISTANCE_METERS;
-          const labelClass = statusClass(row, moving, distanceMetersValue);
+          let labelClass = statusClass(row, moving, distanceMetersValue);
+          if (isStale) labelClass += " stale-data";
           const spreadOffset = getSpreadOffset(lat, lng, `tracker_${id}`);
           const markerLat = lat + spreadOffset.lat;
           const markerLng = lng + spreadOffset.lng;
